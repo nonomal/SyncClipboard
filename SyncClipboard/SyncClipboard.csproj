@@ -28,6 +28,7 @@
     <SelfContained>false</SelfContained>
     <!--<RuntimeIdentifier>win-x64</RuntimeIdentifier>-->
     <DebugType>embedded</DebugType>
+    <AssemblyName>RemoteCommand</AssemblyName>
   </PropertyGroup>
   <PropertyGroup>
     <ApplicationIcon>img\CommandIcon.ico</ApplicationIcon>
