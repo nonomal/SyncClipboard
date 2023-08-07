@@ -102,7 +102,7 @@ public class CommandService : Service
                 catch (Exception ex) when (!_isError)
                 {
                     Console.WriteLine(ex.Message);
-                    _notificationManager.SendText("CommandService failed", ex.ToString());
+                    // _notificationManager.SendText("CommandService failed", ex.ToString());
                     _isError = true;
                 }
             }

@@ -30,7 +30,7 @@
     <DebugType>embedded</DebugType>
   </PropertyGroup>
   <PropertyGroup>
-    <ApplicationIcon>img\icon.ico</ApplicationIcon>
+    <ApplicationIcon>img\CommandIcon.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <None Include="..\.editorconfig" Link=".editorconfig" />
@@ -55,5 +55,8 @@
   <ItemGroup>
     <ProjectReference Include="..\SyncClipboard.Core\SyncClipboard.Core.csproj" />
     <ProjectReference Include="..\SyncClipboard.Server\SyncClipboard.Server.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Folder Include="Resources\" />
   </ItemGroup>
 </Project>

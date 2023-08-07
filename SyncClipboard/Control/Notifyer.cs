@@ -7,7 +7,7 @@ namespace SyncClipboard.Control
 {
     public class Notifyer : TrayIconBase<Icon>
     {
-        protected override Icon DefaultIcon => Properties.Resources.upload;
+        protected override Icon DefaultIcon => Properties.Resources.CommandIcon;
         protected override Icon ErrorIcon => Properties.Resources.erro;
         private const int MAX_NOTIFY_ICON_TIP_LETTERS = 60;
         protected override int MaxToolTipLenth => MAX_NOTIFY_ICON_TIP_LETTERS;
