@@ -1,12 +1,8 @@
 ﻿using Microsoft.Extensions.DependencyInjection;
-using SyncClipboard.ClipboardWinform;
 using SyncClipboard.Control;
 using SyncClipboard.Core;
-using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Interfaces;
-using SyncClipboard.Core.Utilities;
-using SyncClipboard.Utility;
 using System;
 using System.Windows.Forms;
 
@@ -44,12 +40,6 @@ namespace SyncClipboard
             services.AddSingleton<IContextMenu>(Menu);
             services.AddSingleton<ITrayIcon>(notifyer);
             services.AddSingleton<IMainWindow, SettingsForm>();
-            services.AddSingleton<IClipboardFactory, ClipboardFactory>();
-            services.AddSingleton<IClipboardChangingListener, ClipboardListener>();
-
-            services.AddTransient<IClipboardSetter<TextProfile>, TextClipboardSetter>();
-            services.AddTransient<IClipboardSetter<FileProfile>, FileClipboardSetter>();
-            services.AddTransient<IClipboardSetter<ImageProfile>, ImageClipboardSetter>();
 
             return services.BuildServiceProvider();
         }

@@ -12,7 +12,7 @@ public class CommandService : Service
     private const string COMMAND_FILE = "Command.json";
     private const string LOG_TAG = "Command";
     private readonly CancellationTokenSource _cancelSource = new();
-    private bool _isError = false;
+    //private bool _isError = false;
     private readonly ToggleMenuItem _toggleMenuItem;
 
     private readonly NotificationManager _notificationManager;
@@ -93,7 +93,7 @@ public class CommandService : Service
                         await ResetRemoteCommand(new CommandInfo());
                         await ExecuteCommand(command);
                     }
-                    _isError = false;
+                    //_isError = false;
                 }
                 catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
                 {
@@ -103,7 +103,7 @@ public class CommandService : Service
                 {
                     Console.WriteLine(ex.Message);
                     // _notificationManager.SendText("CommandService failed", ex.ToString());
-                    _isError = true;
+                    //_isError = true;
                 }
             }
 
