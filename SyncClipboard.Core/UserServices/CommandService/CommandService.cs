@@ -99,7 +99,7 @@ public class CommandService : Service
                 {
                     await ResetRemoteCommand(new CommandInfo());
                 }
-                catch (Exception ex) when (!_isError)
+                catch (Exception ex)
                 {
                     Console.WriteLine(ex.Message);
                     // _notificationManager.SendText("CommandService failed", ex.ToString());
