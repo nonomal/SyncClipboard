@@ -7,8 +7,12 @@ namespace SyncClipboard.Server.Controller;
 
 public class SyncClipboardController
 {
-    private static async Task<IResult> PutFile(HttpContext content, string rootPath, string path)
+    protected ClipboardProfileDTO? ProfileDtoCache = null;
+
+    private async Task<IResult> PutFile(HttpContext content, string rootPath, string path)
     {
+        ProfileDtoCache = null;
+
         var pathFolder = Path.Combine(rootPath, "file");
         if (!Directory.Exists(pathFolder))
         {
@@ -56,9 +60,8 @@ public class SyncClipboardController
     {
         try
         {
-            var dto = JsonSerializer.Deserialize<ClipboardProfileDTO>(await File.ReadAllTextAsync(Path.Combine(rootPath, path)));
-            ArgumentNullException.ThrowIfNull(dto);
-            return dto;
+            ProfileDtoCache ??= JsonSerializer.Deserialize<ClipboardProfileDTO>(await File.ReadAllTextAsync(Path.Combine(rootPath, path)));
+            return ProfileDtoCache ?? new ClipboardProfileDTO();
         }
         catch (Exception)
         {
@@ -68,6 +71,7 @@ public class SyncClipboardController
 
     protected virtual async Task<IResult> PutSyncProfile(ClipboardProfileDTO profileDTO, string rootPath, string path)
     {
+        ProfileDtoCache = profileDTO;
         await File.WriteAllTextAsync(Path.Combine(rootPath, path), JsonSerializer.Serialize(profileDTO));
         return Results.Ok();
     }

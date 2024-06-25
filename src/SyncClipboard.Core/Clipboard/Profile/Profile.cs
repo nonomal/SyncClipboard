@@ -22,6 +22,7 @@ public abstract class Profile
 
     public abstract ProfileType Type { get; }
     public abstract string ToolTip();
+    public abstract string ShowcaseText();
     public abstract Task UploadProfile(IWebDav webdav, CancellationToken cancelToken);
 
     protected abstract IClipboardSetter<Profile> ClipboardSetter { get; }
@@ -58,18 +59,34 @@ public abstract class Profile
 
     public virtual bool IsAvailableFromRemote() => true;
 
+    public virtual Task EnsureAvailable(CancellationToken token) => Task.CompletedTask;
+
     protected virtual void SetNotification(INotification notificationManager)
     {
         notificationManager.SendText(I18n.Strings.ClipboardUpdated, Text);
     }
 
-    public async Task SetLocalClipboard(bool notify, CancellationToken ctk)
+    public async Task SetLocalClipboard(bool notify, CancellationToken ctk, bool mutex = true)
     {
-        await ClipboardSetter.SetLocalClipboard(MetaInfomation, ctk);
-
-        if (notify && EnableNotify)
+        if (mutex)
         {
-            SetNotification(NotificationManager);
+            await LocalClipboard.Semaphore.WaitAsync(ctk);
+        }
+
+        try
+        {
+            await ClipboardSetter.SetLocalClipboard(MetaInfomation, ctk);
+            if (notify && EnableNotify)
+            {
+                SetNotification(NotificationManager);
+            }
+        }
+        finally
+        {
+            if (mutex)
+            {
+                LocalClipboard.Semaphore.Release();
+            }
         }
     }
 

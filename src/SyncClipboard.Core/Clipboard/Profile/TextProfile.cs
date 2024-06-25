@@ -25,6 +25,15 @@ public class TextProfile : Profile
         return Text;
     }
 
+    public override string ShowcaseText()
+    {
+        if (Text.Length > 500)
+        {
+            return Text[..500] + "\n...";
+        }
+        return Text;
+    }
+
     protected override bool Same(Profile rhs)
     {
         try
@@ -64,7 +73,7 @@ public class TextProfile : Profile
     private static bool HasUrl(string str, out string? url)
     {
         url = null;
-        var expression = @"[^a-zA-Z0-9](?'url'https?://(?'domain'[a-zA-Z0-9.\-_]*)?(?>:(?'port'\d{1,5}))?(/(?'path'[a-zA-Z0-9_\-%]+))*(?:(?>\?(?'query'[a-zA-Z0-9_\-=&%]+))()|(?>#(?'anchor'[a-zA-Z0-9_\-%]+))()){0,2})";
+        var expression = @"([^a-zA-Z0-9]|^)(?'url'https?://(?'domain'[a-zA-Z0-9.\-_]*)?(?>:(?'port'\d{1,5}))?(/(?'path'[a-zA-Z0-9._\-%]+))*(?:(?>\?(?'query'[a-zA-Z0-9._\-=&%]+))()|(?>#(?'anchor'[a-zA-Z0-9._\-%]+))()){0,2})";
         var match = Regex.Match(str, expression);
         if (match.Success)
         {

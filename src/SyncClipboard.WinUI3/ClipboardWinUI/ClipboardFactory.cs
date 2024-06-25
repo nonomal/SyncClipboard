@@ -3,7 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
-using SyncClipboard.Windows;
+using SyncClipboard.Core.Utilities;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -40,33 +40,40 @@ internal partial class ClipboardFactory : ClipboardFactoryBase
         ["Object Descriptor"] = HanleObjectDescriptor,
     }.ToList();
 
+    private static async Task<byte[]> RandomStreamToBytes(IRandomAccessStream stream, CancellationToken ctk)
+    {
+        using DataReader reader = new(stream.GetInputStreamAt(0));
+        var bytes = new byte[stream.Size];
+        await reader.LoadAsync((uint)stream.Size).AsTask().WaitAsync(ctk);
+        reader.ReadBytes(bytes);
+        return bytes;
+    }
+
     private static async Task HanleBitmap(DataPackageView ClipboardData, ClipboardMetaInfomation meta, CancellationToken ctk)
     {
         if (meta.Image is not null) return;
-        var bitmapStrem = await ClipboardData.GetBitmapAsync();
+        var bitmapStrem = await ClipboardData.GetBitmapAsync().AsTask().WaitAsync(ctk);
         using var randomStream = await bitmapStrem.OpenReadAsync();
-        using MagickImage image = new(randomStream.AsStream());
-        meta.Image = WinBitmap.FromImage(image.ToBitmap());
+        meta.Image = new ClipboardImage(await RandomStreamToBytes(randomStream, ctk));
     }
 
     private static async Task HanleDib(DataPackageView ClipboardData, ClipboardMetaInfomation meta, CancellationToken ctk)
     {
-        var res = await ClipboardData.GetDataAsync("DeviceIndependentBitmap");
-        using var stream = res.As<IRandomAccessStream>().AsStream();
-        using MagickImage image = new(stream);
-        meta.Image = WinBitmap.FromImage(image.ToBitmap());
+        var res = await ClipboardData.GetDataAsync("DeviceIndependentBitmap").AsTask().WaitAsync(ctk);
+        using var stream = res.As<IRandomAccessStream>();
+        meta.Image = new ClipboardImage(await RandomStreamToBytes(stream, ctk));
     }
 
     private static async Task HanleDropEffect(DataPackageView ClipboardData, ClipboardMetaInfomation meta, CancellationToken ctk)
     {
-        var res = await ClipboardData.GetDataAsync("Preferred DropEffect");
+        var res = await ClipboardData.GetDataAsync("Preferred DropEffect").AsTask().WaitAsync(ctk);
         using IRandomAccessStream randomAccessStream = res.As<IRandomAccessStream>();
         meta.Effects = (DragDropEffects?)randomAccessStream.AsStreamForRead().ReadByte();
     }
 
     private async static Task HanleObjectDescriptor(DataPackageView ClipboardData, ClipboardMetaInfomation meta, CancellationToken ctk)
     {
-        var res = await ClipboardData.GetDataAsync("Object Descriptor");
+        var res = await ClipboardData.GetDataAsync("Object Descriptor").AsTask().WaitAsync(ctk);
         using IRandomAccessStream randomAccessStream = res.As<IRandomAccessStream>();
         using var stream = randomAccessStream.AsStreamForRead();
         using BinaryReader reader = new(stream);
@@ -88,7 +95,7 @@ internal partial class ClipboardFactory : ClipboardFactoryBase
 
     private static async Task HanleFiles(DataPackageView ClipboardData, ClipboardMetaInfomation meta, CancellationToken ctk)
     {
-        IReadOnlyList<IStorageItem> list = await ClipboardData.GetStorageItemsAsync();
+        IReadOnlyList<IStorageItem> list = await ClipboardData.GetStorageItemsAsync().AsTask().WaitAsync(ctk);
         meta.Files = list.Select(storageItem => storageItem.Path).ToArray();
     }
 
@@ -110,10 +117,10 @@ internal partial class ClipboardFactory : ClipboardFactoryBase
     }
 
     private static async Task HanleHtml(DataPackageView ClipboardData, ClipboardMetaInfomation meta, CancellationToken ctk)
-        => meta.Html = await ClipboardData.GetHtmlFormatAsync();
+        => meta.Html = await ClipboardData.GetHtmlFormatAsync().AsTask().WaitAsync(ctk);
 
     private static async Task HanleText(DataPackageView ClipboardData, ClipboardMetaInfomation meta, CancellationToken ctk)
-        => meta.Text = await ClipboardData.GetTextAsync();
+        => meta.Text = await ClipboardData.GetTextAsync().AsTask().WaitAsync(ctk);
 
     public ClipboardFactory(IServiceProvider serviceProvider)
     {

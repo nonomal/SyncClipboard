@@ -53,9 +53,14 @@ public class ImageProfile : FileProfile
         {
             Directory.CreateDirectory(ImageTemplateFolder);
         }
-        var filePath = Path.Combine(ImageTemplateFolder, $"{Path.GetRandomFileName()}.png");
+        var filePath = Path.Combine(ImageTemplateFolder, $"{Path.GetRandomFileName()}.{GetImageExtention()}");
         image.Save(filePath);
         return filePath;
+    }
+
+    private static string GetImageExtention()
+    {
+        return "png";
     }
 
     protected override void SetNotification(INotification notification)

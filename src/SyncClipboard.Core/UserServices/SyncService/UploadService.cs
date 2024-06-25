@@ -49,6 +49,8 @@ public class UploadService : ClipboardHander
         }
     }
 
+    private bool NotifyOnManualUpload => _syncConfig.NotifyOnManualUpload;
+
     private bool _downServiceChangingLocal = false;
     private Profile? _profileCache;
 
@@ -156,13 +158,11 @@ public class UploadService : ClipboardHander
     {
         _trayIcon.ShowUploadAnimation();
         _trayIcon.SetStatusString(SERVICE_NAME_SIMPLE, "Uploading.");
-        PushStarted?.Invoke();
     }
 
     private void SetWorkingEndStatus()
     {
         _trayIcon.StopAnimation();
-        PushStopped?.Invoke();
     }
 
     private bool IsDownloadServiceWorking(Profile profile)
@@ -179,13 +179,18 @@ public class UploadService : ClipboardHander
 
     private async Task<bool> IsObsoleteMeta(ClipboardMetaInfomation meta, CancellationToken token)
     {
+        if (OperatingSystem.IsWindows())
+        {
+            return false;
+        }
         var latest = await _clipboardFactory.GetMetaInfomation(token);
         return latest != meta;
     }
 
-    protected override async Task HandleClipboard(ClipboardMetaInfomation meta, CancellationToken token)
+    protected override async Task HandleClipboard(ClipboardMetaInfomation meta, Profile profile, CancellationToken token)
     {
-        var profile = await _clipboardFactory.CreateProfileFromMeta(meta, token);
+        PushStarted?.Invoke();
+        using var guard = new ScopeGuard(() => PushStopped?.Invoke());
 
         await SyncService.remoteProfilemutex.WaitAsync(token);
         try
@@ -197,6 +202,7 @@ public class UploadService : ClipboardHander
             }
 
             SetWorkingStartStatus();
+            using var workingStatusGuard = new ScopeGuard(SetWorkingEndStatus);
             await UploadClipboard(profile, token);
         }
         catch (OperationCanceledException)
@@ -207,7 +213,6 @@ public class UploadService : ClipboardHander
         {
             SyncService.remoteProfilemutex.Release();
         }
-        SetWorkingEndStatus();
     }
 
     private async Task UploadClipboard(Profile currentProfile, CancellationToken cancelToken)
@@ -281,7 +286,16 @@ public class UploadService : ClipboardHander
         var token = StopPreviousAndGetNewToken();
         try
         {
-            await HandleClipboard(await _clipboardFactory.GetMetaInfomation(token), token);
+            var meta = await _clipboardFactory.GetMetaInfomation(token);
+            var profile = await _clipboardFactory.CreateProfileFromMeta(meta, token);
+            await HandleClipboard(meta, profile, token);
+            if (NotifyOnManualUpload)
+                _notificationManager.SendTemporary(
+                    new NotificationPara(I18n.Strings.Uploaded, profile.ShowcaseText())
+                    {
+                        Duration = TimeSpan.FromSeconds(4)
+                    }
+                );
         }
         catch { }
     }

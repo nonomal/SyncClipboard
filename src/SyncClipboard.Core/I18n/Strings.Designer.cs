@@ -133,6 +133,15 @@ namespace SyncClipboard.Core.I18n {
         }
         
         /// <summary>
+        ///   查找类似 Check Update for Beta Channel 的本地化字符串。
+        /// </summary>
+        public static string CheckUpdateForBetaChannel {
+            get {
+                return ResourceManager.GetString("CheckUpdateForBetaChannel", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   查找类似 Check Update on Startup 的本地化字符串。
         /// </summary>
         public static string CheckUpdateOnStartup {
@@ -277,6 +286,15 @@ namespace SyncClipboard.Core.I18n {
         }
         
         /// <summary>
+        ///   查找类似 Details 的本地化字符串。
+        /// </summary>
+        public static string Details {
+            get {
+                return ResourceManager.GetString("Details", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   查找类似 Diagnose 的本地化字符串。
         /// </summary>
         public static string Diagnose {
@@ -291,6 +309,24 @@ namespace SyncClipboard.Core.I18n {
         public static string DiagnoseMode {
             get {
                 return ResourceManager.GetString("DiagnoseMode", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Download 的本地化字符串。
+        /// </summary>
+        public static string Download {
+            get {
+                return ResourceManager.GetString("Download", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Please download and install the icon font manually 的本地化字符串。
+        /// </summary>
+        public static string DownloadAndInstallIconFont {
+            get {
+                return ResourceManager.GetString("DownloadAndInstallIconFont", resourceCulture);
             }
         }
         
@@ -480,6 +516,15 @@ namespace SyncClipboard.Core.I18n {
         public static string Hotkeys {
             get {
                 return ResourceManager.GetString("Hotkeys", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Icon Missing Detected 的本地化字符串。
+        /// </summary>
+        public static string IconMissingDetected {
+            get {
+                return ResourceManager.GetString("IconMissingDetected", resourceCulture);
             }
         }
         
@@ -853,6 +898,15 @@ namespace SyncClipboard.Core.I18n {
         }
         
         /// <summary>
+        ///   查找类似 Send notification after manually upload 的本地化字符串。
+        /// </summary>
+        public static string SendNotificationAfterManuallyUpload {
+            get {
+                return ResourceManager.GetString("SendNotificationAfterManuallyUpload", resourceCulture);
+            }
+        }
+        
+        /// <summary>
         ///   查找类似 Send notification after updating local clipboard 的本地化字符串。
         /// </summary>
         public static string SendNotificationAfterUpdateLocalClipboard {
@@ -1110,6 +1164,15 @@ namespace SyncClipboard.Core.I18n {
         public static string TrustInsecureCertificate {
             get {
                 return ResourceManager.GetString("TrustInsecureCertificate", resourceCulture);
+            }
+        }
+        
+        /// <summary>
+        ///   查找类似 Clipboard Uploaded 的本地化字符串。
+        /// </summary>
+        public static string Uploaded {
+            get {
+                return ResourceManager.GetString("Uploaded", resourceCulture);
             }
         }
         

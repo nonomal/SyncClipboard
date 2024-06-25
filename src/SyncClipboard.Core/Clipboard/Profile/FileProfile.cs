@@ -106,7 +106,7 @@ public class FileProfile : Profile
         if (string.IsNullOrEmpty(existedMd5))
         {
             Hash = downloadedMd5;
-            await (WebDav?.PutText(RemoteProfilePath, ToJsonString(), cancelToken) ?? Task.CompletedTask);
+            await WebDav!.PutJson(RemoteProfilePath, ToDto(), cancelToken);
             return;
         }
 
@@ -123,6 +123,11 @@ public class FileProfile : Profile
     public override string ToolTip()
     {
         return StatusTip;
+    }
+
+    public override string ShowcaseText()
+    {
+        return FileName;
     }
 
     protected override bool Same(Profile rhs)
@@ -194,6 +199,14 @@ public class FileProfile : Profile
     }
 
     public override bool IsAvailableFromRemote() => !Oversized();
+
+    public override async Task EnsureAvailable(CancellationToken token)
+    {
+        if (!await WebDav.Exist($"{RemoteFileFolder}/{FileName}", token))
+        {
+            throw new Exception("Remote file is lost.");
+        }
+    }
 
     protected override ClipboardMetaInfomation CreateMetaInformation()
     {

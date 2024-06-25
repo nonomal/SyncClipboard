@@ -10,8 +10,8 @@
         public static readonly string AppDataDirectory = GetOrCreateFolder(GetAppDataDirectory());
         public static readonly string ProgramPath = Environment.ProcessPath ?? "";
         public static readonly string UserConfigFile = FullPath("SyncClipboard.json");
-        public static readonly string AppDataFileFolder = GetOrCreateFolder(FullPath("file"));
-        public static readonly string TemplateFileFolder = GetTemplateFileFolder();
+        public static string AppDataFileFolder => GetOrCreateFolder(FullPath("file"));
+        public static string TemplateFileFolder => GetTemplateFileFolder();
         public static readonly string RemoteFileFolder = "file";
         public static readonly string LogFolder = FullPath("log");
 
@@ -39,11 +39,15 @@
         }
 
         private static string? _templateFileFolder;
+        private static DateTime? _dateTime;
+
         private static string GetTemplateFileFolder()
         {
-            if (_templateFileFolder is null)
+            var dateTime = DateTime.Today;
+            if (dateTime != _dateTime || _templateFileFolder is null)
             {
-                _templateFileFolder = Path.Combine(AppDataFileFolder, DateTime.Now.ToString("yyyyMMdd"));
+                _dateTime = dateTime;
+                _templateFileFolder = Path.Combine(AppDataFileFolder, dateTime.ToString("yyyyMMdd"));
                 Directory.CreateDirectory(_templateFileFolder);
             }
             return _templateFileFolder;

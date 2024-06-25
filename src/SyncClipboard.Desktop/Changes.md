@@ -1,3 +1,24 @@
+0.7.4
+- 修复：不设置hash上传图片/文件到服务器后，桌面客户端会无限重复设置剪贴板
+- 修复：在一些场景复制图片时，无法触发上传(https://github.com/Jeric-X/SyncClipboard/issues/88)
+- 修复：远程文件不存在时，只报错一次，不再图标错乱(https://github.com/Jeric-X/SyncClipboard/issues/87)
+- 为修复 https://github.com/Jeric-X/SyncClipboard/issues/86，Linux无法自动识别语言，默认语言为英语
+- 修复：短时间内多次复制，新复制的内容被之前复制的内容覆盖(https://github.com/Jeric-X/SyncClipboard/issues/91)
+- 功能：手动上传后可以发送通知(https://github.com/Jeric-X/SyncClipboard/issues/82)
+
+0.7.3
+- 修复：macOS Menu Bar图标在同步关闭状态下被裁切、颜色错误
+
+0.7.2
+- 修复：服务端产生大量图片文件
+- 修复：macOS Menu Bar图标被裁切(https://github.com/Jeric-X/SyncClipboard/issues/78)
+- 变更：轮询间隔设置为0时在内部限制为0.5秒
+- 功能：支持更新到预览版本
+
+0.7.1
+- 修复：macOS menu bar图标无法自动自适应系统主题(https://github.com/Jeric-X/SyncClipboard/issues/73)
+- 修复：无法自动删除本地临时文件
+
 0.7.0
 - 功能：支持同步多个文件、文件夹，移动端体现为zip压缩文件，安卓端`HTTP Shortcuts`配置也需要更新以支持此功能
 - 修复：最大上传文件大小设置项在混合模式无法设置(https://github.com/Jeric-X/SyncClipboard/issues/68)
