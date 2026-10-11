@@ -1,5 +1,4 @@
-﻿using Microsoft.Extensions.DependencyInjection;
-using SyncClipboard.Abstract.Notification;
+using Microsoft.Extensions.DependencyInjection;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Desktop.MacOS.Utilities;
 using SyncClipboard.Desktop.MacOS.Views;
@@ -14,9 +13,16 @@ public class AppServices
 
         Desktop.AppServices.ConfigDesktopCommonService(services);
 
+        services.AddSingleton<INativeHotkeyRegistry, CarbonHotkeyRegistry>();
+        services.AddSingleton<ICaretPositionProvider, CaretPositionProvider>();
+        services.AddSingleton<INativeWindowController, MacNativeWindowController>();
+        services.AddSingleton<INativeForegroundWindowWatcher, MacForegroundWindowWatcher>();
+        services.AddSingleton<IMousePositionProvider, MousePositionProvider>();
+        services.AddSingleton<IClipboardOwnerProvider, ClipboardOwnerProvider>();
         services.AddSingleton<IMainWindow, MainWindow>();
-        services.AddSingleton<INotification, Notification>();
+        services.AddKeyedSingleton<IWindow, HistoryWindow>("HistoryWindow");
         services.AddSingleton<ITrayIcon, TrayIconImpl>();
+        services.AddSingleton<IWifiNetworkInfoProvider, MacWifiNetworkInfoProvider>();
         return services;
     }
 }

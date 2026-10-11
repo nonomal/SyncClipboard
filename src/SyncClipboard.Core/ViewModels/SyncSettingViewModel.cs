@@ -1,31 +1,205 @@
-﻿using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using SyncClipboard.Core.Commons;
+using SyncClipboard.Core.I18n;
+using SyncClipboard.Core.Interfaces;
+using SyncClipboard.Core.Models;
 using SyncClipboard.Core.Models.UserConfigs;
+using SyncClipboard.Core.RemoteServer.Adapter.OfficialServer;
+using SyncClipboard.Core.UserServices;
+using SyncClipboard.Core.Utilities.Network;
+using System.Collections.ObjectModel;
 
 namespace SyncClipboard.Core.ViewModels;
 
 public partial class SyncSettingViewModel : ObservableObject
 {
-    #region server
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsNormalClientEnable))]
-    private bool serverEnable;
-    partial void OnServerEnableChanged(bool value) => ServerConfig = ServerConfig with { SwitchOn = value };
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsNormalClientEnable))]
-    private bool clientMixedMode;
-    partial void OnClientMixedModeChanged(bool value) => ServerConfig = ServerConfig with { ClientMixedMode = value };
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ServerConfigDescription))]
-    private ServerConfig serverConfig;
-    partial void OnServerConfigChanged(ServerConfig value)
+    #region account management
+    private static readonly DisplayedAccountConfig NoAccountOption = new()
     {
-        ServerEnable = value.SwitchOn;
-        ClientMixedMode = value.ClientMixedMode;
-        _configManager.SetConfig(value);
+        AccountId = string.Empty,
+        AccountType = string.Empty,
+        DisplayName = Strings.NoAccountSelected,
+    };
+
+    [ObservableProperty]
+    private DisplayedAccountConfig? selectedAccount;
+
+    [ObservableProperty]
+    private bool isLoggedIn = false;
+
+    [ObservableProperty]
+    private bool hasMultipleAccounts = false;
+
+    [ObservableProperty]
+    private bool showQueryInterval = false;
+
+    [ObservableProperty]
+    private string accountAutoSwitchDescription = Strings.Disabled;
+
+    [ObservableProperty]
+    private bool accountAutoSwitchEnabled;
+
+    partial void OnAccountAutoSwitchEnabledChanged(bool value)
+    {
+        var config = _configManager.GetConfig<NetworkAccountSwitchConfig>();
+        if (config.Enabled != value)
+        {
+            _configManager.SetConfig(config with { Enabled = value });
+        }
+    }
+
+    private bool _isUpdatingSelectedAccount;
+
+    public bool IsNotLoggedIn => !IsLoggedIn;
+
+    public bool HasSelectedAccount => SelectedAccount is not null
+        && !string.IsNullOrWhiteSpace(SelectedAccount.AccountId)
+        && !string.IsNullOrWhiteSpace(SelectedAccount.AccountType);
+
+    public ObservableCollection<DisplayedAccountConfig> SavedAccounts { get; } = [];
+
+    partial void OnIsLoggedInChanged(bool value)
+    {
+        OnPropertyChanged(nameof(IsNotLoggedIn));
+    }
+
+    partial void OnSelectedAccountChanged(DisplayedAccountConfig? value)
+    {
+        OnPropertyChanged(nameof(HasSelectedAccount));
+        if (value != null && !_isUpdatingSelectedAccount)
+        {
+            var accountConfig = new AccountConfig
+            {
+                AccountId = value.AccountId,
+                AccountType = value.AccountType
+            };
+
+            _accountManager.SelectAccount(accountConfig, AccountManager.AccountSelectionOrigin.Manual);
+            ShowQueryInterval = !accountConfig.IsEmpty() && value.AccountType != OfficialConfig.ConfigTypeName;
+        }
+    }
+
+    [RelayCommand]
+    private void AddAccount()
+    {
+        _mainVM.NavigateToNextLevel(PageDefinition.AddAccount);
+    }
+
+    [RelayCommand]
+    private async Task RemoveAccount()
+    {
+        var selectedAccount = SelectedAccount;
+        if (HasSelectedAccount && selectedAccount != null)
+        {
+            var account = new AccountConfig
+            {
+                AccountId = selectedAccount.AccountId,
+                AccountType = selectedAccount.AccountType,
+            };
+            var switchConfig = _configManager.GetConfig<NetworkAccountSwitchConfig>();
+            var affectedRuleCount = switchConfig.Rules.Count(rule =>
+                rule.TargetAccount.AccountId == account.AccountId
+                && rule.TargetAccount.AccountType == account.AccountType);
+            var message = string.Format(Strings.DeleteAccountConfirmMessage, selectedAccount.DisplayName);
+            if (affectedRuleCount > 0)
+            {
+                message += Environment.NewLine + Environment.NewLine
+                    + string.Format(Strings.AccountRuleCleanup, affectedRuleCount);
+            }
+
+            var confirmed = await _dialog.ShowConfirmationAsync(Strings.ConfirmDelete, message);
+
+            if (!confirmed)
+            {
+                return;
+            }
+            var cleanup = NetworkAccountSwitchConfigCleaner.RemoveAccount(switchConfig, account);
+            if (cleanup.RemovedRuleCount > 0 || cleanup.RemovedDefaultAccount)
+            {
+                _configManager.SetConfig(cleanup.Config);
+            }
+            _ = _accountManager.RemoveConfig(account.AccountType, account.AccountId);
+        }
+    }
+
+    [RelayCommand]
+    private void EditAccount()
+    {
+        if (HasSelectedAccount && SelectedAccount != null)
+        {
+            var accountConfig = new AccountConfig
+            {
+                AccountId = SelectedAccount.AccountId,
+                AccountType = SelectedAccount.AccountType
+            };
+            _mainVM.NavigateToNextLevel(PageDefinition.DefaultAddAccount, accountConfig);
+        }
+    }
+
+    private void OnSavedAccountsChanged(IEnumerable<DisplayedAccountConfig> newAccounts)
+    {
+        LoadSavedAccounts(newAccounts);
+    }
+
+    private void LoadSavedAccounts(IEnumerable<DisplayedAccountConfig>? accounts = null)
+    {
+        var actualAccounts = (accounts ?? _accountManager.GetSavedAccounts()).ToList();
+        SavedAccounts.Clear();
+        SavedAccounts.Add(NoAccountOption);
+        foreach (var account in actualAccounts)
+        {
+            SavedAccounts.Add(account);
+        }
+
+        HasMultipleAccounts = actualAccounts.Count > 1;
+        IsLoggedIn = actualAccounts.Count > 0;
+
+        var currentConfig = _configManager.GetConfig<AccountConfig>();
+        SetSelectedAccount(currentConfig);
+    }
+
+    [RelayCommand]
+    private void OpenNetworkAccountSwitch() => _mainVM.NavigateToNextLevel(PageDefinition.NetworkAccountSwitch);
+
+    private void OnNetworkAccountSwitchStatusChanged(object? sender, EventArgs e) =>
+        _ = _threadDispatcher.RunOnMainThreadAsync(() =>
+        {
+            if (_networkAccountSwitchStatusActive)
+            {
+                AccountAutoSwitchDescription = NetworkAccountSwitchStatusFormatter.Format(_networkAccountSwitchService.Status);
+            }
+        });
+
+    private void OnNetworkAccountSwitchConfigChanged(NetworkAccountSwitchConfig config) =>
+        _ = _threadDispatcher.RunOnMainThreadAsync(() =>
+        {
+            AccountAutoSwitchEnabled = config.Enabled;
+        });
+
+    private void SetSelectedAccount(AccountConfig accountConfig)
+    {
+        _isUpdatingSelectedAccount = true;
+        try
+        {
+            SelectedAccount = accountConfig.IsEmpty()
+                ? NoAccountOption
+                : SavedAccounts.FirstOrDefault(a =>
+                    a.AccountId == accountConfig.AccountId
+                    && a.AccountType == accountConfig.AccountType)
+                    ?? NoAccountOption;
+            ShowQueryInterval = HasSelectedAccount
+                && SelectedAccount.AccountType != OfficialConfig.ConfigTypeName;
+        }
+        finally
+        {
+            _isUpdatingSelectedAccount = false;
+        }
+    }
+
+    private void OnCurrentAccountChanged(AccountConfig accountConfig, object? _)
+    {
+        _ = _threadDispatcher.RunOnMainThreadAsync(() => SetSelectedAccount(accountConfig));
     }
 
     #endregion
@@ -36,13 +210,12 @@ public partial class SyncSettingViewModel : ObservableObject
     partial void OnSyncEnableChanged(bool value) => ClientConfig = ClientConfig with { SyncSwitchOn = value };
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(UseManulServer))]
-    private bool useLocalServer;
-    partial void OnUseLocalServerChanged(bool value) => ClientConfig = ClientConfig with { UseLocalServer = value };
-
-    [ObservableProperty]
     private uint intervalTime;
     partial void OnIntervalTimeChanged(uint value) => ClientConfig = ClientConfig with { IntervalTime = value };
+
+    [ObservableProperty]
+    private uint retryTimes;
+    partial void OnRetryTimesChanged(uint value) => ClientConfig = ClientConfig with { RetryTimes = value };
 
     [ObservableProperty]
     private uint timeOut;
@@ -53,115 +226,163 @@ public partial class SyncSettingViewModel : ObservableObject
     partial void OnMaxFileSizeChanged(uint value) => ClientConfig = ClientConfig with { MaxFileByte = value * 1024 * 1024 };
 
     [ObservableProperty]
-    private bool autoDeleleServerFile;
-    partial void OnAutoDeleleServerFileChanged(bool value) => ClientConfig = ClientConfig with { DeletePreviousFilesOnPush = value };
-
-    [ObservableProperty]
     private bool notifyOnDownloaded;
     partial void OnNotifyOnDownloadedChanged(bool value) => ClientConfig = ClientConfig with { NotifyOnDownloaded = value };
 
     [ObservableProperty]
-    private bool trustInsecureCertificate;
-    partial void OnTrustInsecureCertificateChanged(bool value) => ClientConfig = ClientConfig with { TrustInsecureCertificate = value };
+    private bool notifyOnManualUpload;
+    partial void OnNotifyOnManualUploadChanged(bool value) => ClientConfig = ClientConfig with { NotifyOnManualUpload = value };
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ClientConfigDescription))]
+    private bool doNotUploadWhenCut;
+    partial void OnDoNotUploadWhenCutChanged(bool value) => ClientConfig = ClientConfig with { DoNotUploadWhenCut = value };
+
+    [ObservableProperty]
+    private bool ignoreExcludeForSyncSuggestion;
+    partial void OnIgnoreExcludeForSyncSuggestionChanged(bool value) => ClientConfig = ClientConfig with { IgnoreExcludeForSyncSuggestion = value };
+
+    [ObservableProperty]
+    private bool notifyFileSyncProgress;
+    partial void OnNotifyFileSyncProgressChanged(bool value) => ClientConfig = ClientConfig with { NotifyFileSyncProgress = value };
+
+    [ObservableProperty]
+    private bool uploadEnable;
+    partial void OnUploadEnableChanged(bool value) => ClientConfig = ClientConfig with { PushSwitchOn = value };
+
+    [ObservableProperty]
+    private bool downloadEnable;
+    partial void OnDownloadEnableChanged(bool value) => ClientConfig = ClientConfig with { PullSwitchOn = value };
+
+    [ObservableProperty]
+    private bool textEnable;
+    partial void OnTextEnableChanged(bool value) => ClientConfig = ClientConfig with { EnableUploadText = value };
+
+    [ObservableProperty]
+    private bool imageEnable;
+    partial void OnImageEnableChanged(bool value) => ClientConfig = ClientConfig with { EnableUploadImage = value };
+
+    [ObservableProperty]
+    private bool singleFileEnable;
+    partial void OnSingleFileEnableChanged(bool value) => ClientConfig = ClientConfig with { EnableUploadSingleFile = value };
+
+    [ObservableProperty]
+    private bool multiFileEnable;
+    partial void OnMultiFileEnableChanged(bool value) => ClientConfig = ClientConfig with { EnableUploadMultiFile = value };
+
+    [ObservableProperty]
     private SyncConfig clientConfig;
     partial void OnClientConfigChanged(SyncConfig value)
     {
         IntervalTime = value.IntervalTime;
+        RetryTimes = value.RetryTimes;
         SyncEnable = value.SyncSwitchOn;
-        UseLocalServer = value.UseLocalServer;
         TimeOut = value.TimeOut;
         MaxFileSize = value.MaxFileByte / 1024 / 1024;
-        AutoDeleleServerFile = value.DeletePreviousFilesOnPush;
         NotifyOnDownloaded = value.NotifyOnDownloaded;
-        TrustInsecureCertificate = value.TrustInsecureCertificate;
+        NotifyOnManualUpload = value.NotifyOnManualUpload;
+        DoNotUploadWhenCut = value.DoNotUploadWhenCut;
+        IgnoreExcludeForSyncSuggestion = value.IgnoreExcludeForSyncSuggestion;
+        NotifyFileSyncProgress = value.NotifyFileSyncProgress;
+        UploadEnable = value.PushSwitchOn;
+        DownloadEnable = value.PullSwitchOn;
+        TextEnable = value.EnableUploadText;
+        ImageEnable = value.EnableUploadImage;
+        SingleFileEnable = value.EnableUploadSingleFile;
+        MultiFileEnable = value.EnableUploadMultiFile;
         _configManager.SetConfig(value);
     }
 
     [RelayCommand]
-    private void LoginWithNextcloud()
+    private void SetFileSyncFilter()
     {
-        _mainVM.NavigateToNextLevel(PageDefinition.NextCloudLogIn);
+        _mainVM.NavigateToNextLevel(PageDefinition.FileSyncFilterSetting);
     }
 
-    #endregion
-
-    #region for view only
-
-    public bool IsNormalClientEnable => !ServerEnable || !ClientMixedMode;
-
-    public bool UseManulServer => !UseLocalServer;
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ServerConfigDescription))]
-    public bool showServerPassword = false;
-
-    public string ServerConfigDescription =>
-@$"{I18n.Strings.Port}{new string('\t', int.Parse(I18n.Strings.PortTabRepeat))}: {ServerConfig.Port}
-{I18n.Strings.UserName}{new string('\t', int.Parse(I18n.Strings.UserNameTabRepeat))}: {ServerConfig.UserName}
-{I18n.Strings.Password}{new string('\t', int.Parse(I18n.Strings.PasswordTabRepeat))}: {GetPasswordString(ServerConfig.Password, ShowServerPassword)}";
-
-    [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(ClientConfigDescription))]
-    public bool showClientPassword = false;
-
-    public string ClientConfigDescription =>
-@$"{I18n.Strings.Address}{new string('\t', int.Parse(I18n.Strings.PortTabRepeat))}: {ClientConfig.RemoteURL}
-{I18n.Strings.UserName}{new string('\t', int.Parse(I18n.Strings.UserNameTabRepeat))}: {ClientConfig.UserName}
-{I18n.Strings.Password}{new string('\t', int.Parse(I18n.Strings.PasswordTabRepeat))}: {GetPasswordString(ClientConfig.Password, ShowClientPassword)}";
-
-    private static string GetPasswordString(string origin, bool? show)
+    [RelayCommand]
+    private void SetClipboardOwnerFilter()
     {
-        return show ?? false ? origin : "*********";
+        _mainVM.NavigateToNextLevel(PageDefinition.ClipboardOwnerFilterSetting, ClipboardOwnerFilterConfig.ConfigKey);
+    }
+
+    [RelayCommand]
+    private void OpenSyncContentControlPage()
+    {
+        _mainVM.NavigateToNextLevel(PageDefinition.SyncContentControl);
+    }
+
+    [RelayCommand]
+    private void OpenClipboardAcquisitionRulesPage()
+    {
+        _mainVM.NavigateToNextLevel(PageDefinition.ClipboardAcquisitionRules);
     }
 
     #endregion
 
     private readonly ConfigManager _configManager;
     private readonly MainViewModel _mainVM;
+    private readonly AccountManager _accountManager;
+    private readonly IMainWindowDialog _dialog;
+    private readonly IThreadDispatcher _threadDispatcher;
+    private readonly NetworkAccountSwitchService _networkAccountSwitchService;
+    private bool _networkAccountSwitchStatusActive;
 
-    public SyncSettingViewModel(ConfigManager configManager, MainViewModel mainViewModel)
+    public void ActivateNetworkAccountSwitchStatus()
+    {
+        if (_networkAccountSwitchStatusActive)
+            return;
+        _networkAccountSwitchStatusActive = true;
+        _networkAccountSwitchService.StatusChanged += OnNetworkAccountSwitchStatusChanged;
+        AccountAutoSwitchDescription = NetworkAccountSwitchStatusFormatter.Format(_networkAccountSwitchService.Status);
+    }
+
+    public void DeactivateNetworkAccountSwitchStatus()
+    {
+        if (!_networkAccountSwitchStatusActive)
+            return;
+        _networkAccountSwitchStatusActive = false;
+        _networkAccountSwitchService.StatusChanged -= OnNetworkAccountSwitchStatusChanged;
+    }
+
+    public SyncSettingViewModel(
+        ConfigManager configManager,
+        MainViewModel mainViewModel,
+        AccountManager accountManager,
+        IMainWindowDialog dialog,
+        IThreadDispatcher threadDispatcher,
+        NetworkAccountSwitchService networkAccountSwitchService)
     {
         _configManager = configManager;
         _mainVM = mainViewModel;
-        _configManager.ListenConfig<ServerConfig>(config => ServerConfig = config);
-        serverConfig = _configManager.GetConfig<ServerConfig>();
-        serverEnable = serverConfig.SwitchOn;
-        clientMixedMode = serverConfig.ClientMixedMode;
+        _accountManager = accountManager;
+        _dialog = dialog;
+        _threadDispatcher = threadDispatcher;
+        _networkAccountSwitchService = networkAccountSwitchService;
 
         _configManager.ListenConfig<SyncConfig>(config => ClientConfig = config);
+        _configManager.ListenConfig<NetworkAccountSwitchConfig>(OnNetworkAccountSwitchConfigChanged);
+        _accountManager.SavedAccountsChanged += OnSavedAccountsChanged;
+        _accountManager.CurrentAccountChanged += OnCurrentAccountChanged;
+        accountAutoSwitchEnabled = _configManager.GetConfig<NetworkAccountSwitchConfig>().Enabled;
+        accountAutoSwitchDescription = NetworkAccountSwitchStatusFormatter.Format(_networkAccountSwitchService.Status);
+
         clientConfig = _configManager.GetConfig<SyncConfig>();
         intervalTime = clientConfig.IntervalTime;
+        retryTimes = clientConfig.RetryTimes;
         syncEnable = clientConfig.SyncSwitchOn;
-        useLocalServer = clientConfig.UseLocalServer;
         timeOut = clientConfig.TimeOut;
         maxFileSize = clientConfig.MaxFileByte / 1024 / 1024;
-        autoDeleleServerFile = clientConfig.DeletePreviousFilesOnPush;
         notifyOnDownloaded = clientConfig.NotifyOnDownloaded;
-        trustInsecureCertificate = clientConfig.TrustInsecureCertificate;
-    }
+        notifyOnManualUpload = clientConfig.NotifyOnManualUpload;
+        doNotUploadWhenCut = clientConfig.DoNotUploadWhenCut;
+        ignoreExcludeForSyncSuggestion = clientConfig.IgnoreExcludeForSyncSuggestion;
+        notifyFileSyncProgress = clientConfig.NotifyFileSyncProgress;
+        uploadEnable = clientConfig.PushSwitchOn;
+        downloadEnable = clientConfig.PullSwitchOn;
+        textEnable = clientConfig.EnableUploadText;
+        imageEnable = clientConfig.EnableUploadImage;
+        singleFileEnable = clientConfig.EnableUploadSingleFile;
+        multiFileEnable = clientConfig.EnableUploadMultiFile;
 
-    public string? SetServerConfig(string portString, string username, string password)
-    {
-        if (!ushort.TryParse(portString, out var port))
-        {
-            return I18n.Strings.PortRangeIs;
-        }
-        if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password))
-        {
-            return I18n.Strings.UsernameOrPasswordBlank;
-        }
-
-        ServerConfig = ServerConfig with { Password = password, Port = port, UserName = username };
-
-        return null;
-    }
-
-    public string? SetClientConfig(string url, string username, string password)
-    {
-        ClientConfig = ClientConfig with { RemoteURL = url, UserName = username, Password = password };
-        return null;
+        LoadSavedAccounts();
     }
 }

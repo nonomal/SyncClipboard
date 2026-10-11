@@ -1,45 +1,24 @@
 ﻿using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.DependencyInjection;
-using SyncClipboard.Abstract.Notification;
+using NativeNotification.Interface;
 using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
 using SyncClipboard.Core.Models.UserConfigs;
+using SyncClipboard.Core.RemoteServer.Adapter.WebDavServer;
 using SyncClipboard.Core.Utilities;
 using SyncClipboard.Core.Utilities.Web;
 
 namespace SyncClipboard.Core.ViewModels;
 
-public partial class FileTreeViewModel : ObservableObject
+public partial class NextCloudLogInViewModel(IServiceProvider serviceProvider) : ObservableObject
 {
-    public string FullPath { get; }
-    public string Name { get; }
-    public bool IsFolder { get; }
-
-    [ObservableProperty]
-    public List<FileTreeViewModel>? children;
-
-    public FileTreeViewModel(string fullPath, string name, bool isFolder)
-    {
-        FullPath = fullPath;
-        Name = name;
-        IsFolder = isFolder;
-    }
-}
-
-public partial class NextCloudLogInViewModel : ObservableObject
-{
-    private readonly IServiceProvider _serviceProvider;
-    private INotification NotificationManager => _serviceProvider.GetRequiredService<INotification>();
+    private readonly IServiceProvider _serviceProvider = serviceProvider;
+    private INotificationManager NotificationManager => _serviceProvider.GetRequiredService<INotificationManager>();
     private ConfigManager ConfigManager => _serviceProvider.GetRequiredService<ConfigManager>();
+    private AccountManager AccountManager => _serviceProvider.GetRequiredService<AccountManager>();
     private IAppConfig AppConfig => _serviceProvider.GetRequiredService<IAppConfig>();
-
-    public NextCloudLogInViewModel(IServiceProvider serviceProvider)
-    {
-        _serviceProvider = serviceProvider;
-        userInputUrl = "https://";
-    }
 
     private CancellationTokenSource? _cancelSource;
     private CancellationTokenSource? CancelSource
@@ -60,7 +39,7 @@ public partial class NextCloudLogInViewModel : ObservableObject
     public bool ShowTreeList => TreeList is not null;
 
     [ObservableProperty]
-    private string userInputUrl;
+    private string userInputUrl = "https://";
 
     public bool CanCancel => CancelSource is not null && !CancelSource.IsCancellationRequested;
 
@@ -91,7 +70,7 @@ public partial class NextCloudLogInViewModel : ObservableObject
         TreeList = null;
         try
         {
-            var insecure = ConfigManager.GetConfig<SyncConfig>().TrustInsecureCertificate;
+            var insecure = ConfigManager.GetConfig<SyncConfig>().IgnoreCertificateErrors;
             using var httpClient = new HttpClientFactory { TrustInsecureCertificate = insecure }.CreateClient();
             var loginFlow = new NextcloudLogInFlow(UserInputUrl, httpClient);
             var userloginUrl = await loginFlow.GetUserLoginUrl(CancelSource.Token);
@@ -104,7 +83,7 @@ public partial class NextCloudLogInViewModel : ObservableObject
         catch (TaskCanceledException) { }
         catch (Exception ex)
         {
-            NotificationManager.SendText(I18n.Strings.FailedToAuth, GetErrorMessage(ex));
+            NotificationManager.ShowText(I18n.Strings.FailedToAuth, GetErrorMessage(ex));
         }
         finally
         {
@@ -117,15 +96,17 @@ public partial class NextCloudLogInViewModel : ObservableObject
     public void SetFolder(FileTreeViewModel node)
     {
         ArgumentNullException.ThrowIfNull(tempWebDavCredential);
-        var config = ConfigManager.GetConfig<SyncConfig>();
-        ConfigManager.SetConfig(
-            config with
-            {
-                UserName = tempWebDavCredential.Username,
-                Password = tempWebDavCredential.Password,
-                RemoteURL = $"{tempWebDavCredential.Url.Trim('/')}/{node.FullPath.Trim('/')}"
-            }
-        );
+
+        var webDavConfig = new WebDavConfig() with
+        {
+            UserName = tempWebDavCredential.Username,
+            Password = tempWebDavCredential.Password,
+            RemoteURL = $"{tempWebDavCredential.Url.Trim('/')}/{node.FullPath.Trim('/')}",
+        };
+
+        var accountId = AccountManager.CreateAccountId(WebDavConfig.ConfigTypeName);
+        AccountManager.SetConfig(accountId, WebDavConfig.ConfigTypeName, webDavConfig);
+
         _serviceProvider.GetRequiredService<MainViewModel>().NavigateToLastLevel();
     }
 

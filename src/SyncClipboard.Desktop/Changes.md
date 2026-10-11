@@ -1,3 +1,55 @@
+2.9.0
+- 更新版本号与Windows版相同
+
+0.8.0
+- 修复：SyncClipboard无法识别的剪贴板被强制覆盖（https://github.com/Jeric-X/SyncClipboard/issues/181）
+- 修复：在部分Linux环境中复制非英文同步到其他设备后变为乱码（https://github.com/Jeric-X/SyncClipboard/issues/172）
+- 修复：在部分gnome环境下的文件管理器中无法粘贴文件
+- 功能：从密码管理软件复制的内容不会被同步（仅macOS）（https://github.com/Jeric-X/SyncClipboard/issues/157）  
+:::info  
+下版本Linux/macOS将使用[主仓库](https://github.com/Jeric-X/SyncClipboard/)发布，与Windows版本合并版本号  
+如果不是紧急问题修复，下版本将更新.net运行时到8.0  
+:::
+
+0.7.8
+- 功能：支持自定义临时文件的保存时长
+- 功能：server端增加监听ipv6地址
+
+0.7.7
+- 功能：增加快捷键：手动上传（忽略内容控制）(https://github.com/Jeric-X/SyncClipboard/issues/122, https://github.com/Jeric-X/SyncClipboard/issues/115)
+- 修复：在office或wps表格中复制内容后剪贴板失去格式信息(https://github.com/Jeric-X/SyncClipboard/issues/130)
+- 修复：重试次数设为0时上传失败(https://github.com/Jeric-X/SyncClipboard/issues/117)
+
+0.7.6
+- 修复：使用aliyundrive-webdav及其衍生工具作为服务器时无法上传(https://github.com/Jeric-X/SyncClipboard/issues/98)
+- 功能：添加多种同步内容控制开关（上传/下载/文本/文件/文件夹/文件类型）(https://github.com/Jeric-X/SyncClipboard/issues/90 , https://github.com/Jeric-X/SyncClipboard/issues/111)
+
+0.7.5
+- 功能：可以设置重试次数，下载失败超过重试次数自动下载会暂停，触发一次上传后会恢复自动下载(https://github.com/Jeric-X/SyncClipboard/issues/100)
+- 功能：可以设置剪切文件时不上传(Linux)(https://github.com/Jeric-X/SyncClipboard/issues/107)
+- 修复：快捷键不允许设置为ctrl + c或command + c (https://github.com/Jeric-X/SyncClipboard/issues/103)
+
+0.7.4
+- 修复：不设置hash上传图片/文件到服务器后，桌面客户端会无限重复设置剪贴板
+- 修复：在一些场景复制图片时，无法触发上传(https://github.com/Jeric-X/SyncClipboard/issues/88)
+- 修复：远程文件不存在时，只报错一次，不再图标错乱(https://github.com/Jeric-X/SyncClipboard/issues/87)
+- 为修复 https://github.com/Jeric-X/SyncClipboard/issues/86，Linux无法自动识别语言，默认语言为英语
+- 修复：短时间内多次复制，新复制的内容被之前复制的内容覆盖(https://github.com/Jeric-X/SyncClipboard/issues/91)
+- 功能：手动上传后可以发送通知(https://github.com/Jeric-X/SyncClipboard/issues/82)
+
+0.7.3
+- 修复：macOS Menu Bar图标在同步关闭状态下被裁切、颜色错误
+
+0.7.2
+- 修复：服务端产生大量图片文件
+- 修复：macOS Menu Bar图标被裁切(https://github.com/Jeric-X/SyncClipboard/issues/78)
+- 变更：轮询间隔设置为0时在内部限制为0.5秒
+- 功能：支持更新到预览版本
+
+0.7.1
+- 修复：macOS menu bar图标无法自动自适应系统主题(https://github.com/Jeric-X/SyncClipboard/issues/73)
+- 修复：无法自动删除本地临时文件
+
 0.7.0
 - 功能：支持同步多个文件、文件夹，移动端体现为zip压缩文件，安卓端`HTTP Shortcuts`配置也需要更新以支持此功能
 - 修复：最大上传文件大小设置项在混合模式无法设置(https://github.com/Jeric-X/SyncClipboard/issues/68)

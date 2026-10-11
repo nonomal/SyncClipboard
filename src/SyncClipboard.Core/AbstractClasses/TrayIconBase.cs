@@ -1,15 +1,30 @@
-﻿using SyncClipboard.Core.Interfaces;
+﻿using Microsoft.Extensions.DependencyInjection;
+using SyncClipboard.Core.Interfaces;
+using SyncClipboard.Core.Utilities.Runner;
 using SyncClipboard.Core.ViewModels;
 
 namespace SyncClipboard.Core.AbstractClasses;
 
 public abstract class TrayIconBase<IconType> : ITrayIcon where IconType : class
 {
-    public abstract event Action MainWindowWakedUp;
+    public event Action? LeftClicked;
+    public event Action? DoubleClicked;
+
+    private readonly MultiTimesEventSimulator _clickSimulator = new(TimeSpan.FromMilliseconds(200));
+
+    protected TrayIconBase()
+    {
+        _clickSimulator[1] = () => LeftClicked?.Invoke();
+        _clickSimulator[2] = () => DoubleClicked?.Invoke();
+    }
+
+    protected void OnRawLeftClicked() => _clickSimulator.TriggerOriginalEvent();
+
     public abstract void Create();
 
     #region Icon Animatinon
     private const int ANIMATED_ICON_DELAY_TIME = 150;
+    private readonly Lock _animationLock = new();
     private Timer? _iconTimer;
     private bool _isShowingDanamicIcon;
     private bool _isActive = true;
@@ -18,7 +33,7 @@ public abstract class TrayIconBase<IconType> : ITrayIcon where IconType : class
     private IEnumerator<IconType>? _dynamicIconEnumerator;
     private IconType? @staticIcon = null;
     private IconType StaticIcon { get => @staticIcon ?? DefaultIcon; set => @staticIcon = value; }
-    private readonly Dictionary<string, string> _statusList = new();
+    private readonly Dictionary<string, string> _statusList = [];
 
     protected abstract IconType DefaultIcon { get; }
     protected abstract IconType ErrorIcon { get; }
@@ -52,7 +67,7 @@ public abstract class TrayIconBase<IconType> : ITrayIcon where IconType : class
 
         StopAnimation();
 
-        lock (this)
+        lock (_animationLock)
         {
             _dynamicIcons = icons;
             _dynamicIconEnumerator = icons.GetEnumerator();
@@ -63,7 +78,7 @@ public abstract class TrayIconBase<IconType> : ITrayIcon where IconType : class
 
     public void StopAnimation()
     {
-        lock (this)
+        lock (_animationLock)
         {
             _iconTimer?.Dispose();
             _iconTimer = null;
@@ -78,7 +93,7 @@ public abstract class TrayIconBase<IconType> : ITrayIcon where IconType : class
     private void SetNextDynamicNotifyIcon(object? _)
     {
         IconType icon;
-        lock (this)
+        lock (_animationLock)
         {
             if (_dynamicIcons is null || _dynamicIconEnumerator is null)
             {

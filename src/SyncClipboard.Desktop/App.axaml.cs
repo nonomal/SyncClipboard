@@ -1,13 +1,14 @@
 ﻿using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
-using Avalonia.Data.Core.Plugins;
 using Avalonia.Input.Platform;
 using Avalonia.Markup.Xaml;
 using Avalonia.Styling;
 using Microsoft.Extensions.DependencyInjection;
 using SyncClipboard.Core;
+using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Interfaces;
+using SyncClipboard.Core.Models.UserConfigs;
 using SyncClipboard.Desktop.Views;
 using System;
 
@@ -18,6 +19,7 @@ public partial class App : Application
     public IServiceProvider Services { get; private set; }
     public new static App Current => (App)Application.Current!;
     public MainWindow MainWindow => (MainWindow)Services.GetRequiredService<IMainWindow>();
+    public ConfigManager ConfigManager => Services.GetRequiredService<ConfigManager>();
     public ILogger Logger;
     public IClipboard Clipboard => MainWindow.Clipboard!;
 
@@ -30,7 +32,6 @@ public partial class App : Application
     {
         Services = AppServices.ConfigureServices().BuildServiceProvider();
         Logger = Services.GetRequiredService<ILogger>();
-        AppCore = new AppCore(Services);
     }
 
 #pragma warning disable CS8618 // 在退出构造函数时，不可为 null 的字段必须包含非 null 值。请考虑声明为可以为 null。
@@ -39,20 +40,18 @@ public partial class App : Application
     {
         Services = serviceCollection.BuildServiceProvider();
         Logger = Services.GetRequiredService<ILogger>();
-        AppCore = new AppCore(Services);
     }
 
     public override void Initialize()
     {
         AvaloniaXamlLoader.Load(this);
+#if DEBUG
+        this.AttachDeveloperTools();
+#endif
     }
 
-    public override void OnFrameworkInitializationCompleted()
+    public override async void OnFrameworkInitializationCompleted()
     {
-        // Line below is needed to remove Avalonia data validation.
-        // Without this line you will get duplicate validations from both Avalonia and CT
-        BindingPlugins.DataValidators.RemoveAt(0);
-
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime desktop)
         {
             desktop.ShutdownMode = ShutdownMode.OnExplicitShutdown;
@@ -66,6 +65,18 @@ public partial class App : Application
         }
         base.OnFrameworkInitializationCompleted();
 
+        var appCore = await AppCore.CreateAsync(Services);
+        if (appCore is null)
+        {
+            _appLife.Shutdown();
+            return;
+        }
+        AppCore = appCore;
+
+        ConfigManager.GetAndListenConfig<ProgramConfig>(config =>
+        {
+            SetTheme(config.Theme);
+        });
         ThemeSetting();
         ActualThemeVariantChanged += (_, _) => ThemeSetting();
 
@@ -85,9 +96,13 @@ public partial class App : Application
         }
     }
 
-    public void ExitApp()
+    public static void SetTheme(string theme)
     {
-        AppCore.Stop();
-        _appLife.Shutdown();
+        App.Current.RequestedThemeVariant = theme switch
+        {
+            "Light" => ThemeVariant.Light,
+            "Dark" => ThemeVariant.Dark,
+            _ => ThemeVariant.Default,
+        };
     }
 }

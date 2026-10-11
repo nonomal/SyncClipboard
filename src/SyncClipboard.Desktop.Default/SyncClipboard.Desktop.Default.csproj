@@ -1,13 +1,15 @@
 ﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net6.0</TargetFramework>
+    <TargetFrameworks>net10.0-windows10.0.17763.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <ApplicationManifest>app.manifest</ApplicationManifest>
-    <Platforms>x86;x64;ARM64;AnyCPU</Platforms>
+    <Platforms>x64;ARM64;AnyCPU</Platforms>
     <ApplicationIcon>..\SyncClipboard.Desktop\Assets\icon.ico</ApplicationIcon>
-    <RuntimeIdentifiers>win10-x86;win10-x64;win10-arm64;linux-x64;linux-arm64;</RuntimeIdentifiers>
+    <RuntimeIdentifiers>win-x64;win-arm64;linux-x64;linux-arm64;</RuntimeIdentifiers>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <SatelliteResourceLanguages>en;zh-Hans</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <Target Name="CopyFiles" AfterTargets="Build">
@@ -15,13 +17,12 @@
       <LicenseFiles Include="$(ProjectDir)\..\..\LICENSES\**\*.*" />
     </ItemGroup>
     <Copy SourceFiles="@(LicenseFiles)" DestinationFolder="$(OutDir)\LICENSES\%(RecursiveDir)" SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" Retries="3" RetryDelayMilliseconds="300" />
-    <Copy SourceFiles="$(ProjectDir)\..\SyncClipboard.Desktop\Assets\icon.svg" DestinationFolder="$(OutDir)\Assets" SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" Retries="3" RetryDelayMilliseconds="300" />
+    <Copy SourceFiles="..\SyncClipboard.Desktop\Assets\icon.svg" DestinationFolder="$(OutDir)\Assets" SkipUnchangedFiles="false" OverwriteReadOnlyFiles="true" Retries="3" RetryDelayMilliseconds="300" />
   </Target>
 
   <ItemGroup>
     <PackageReference Include="Avalonia.Desktop" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
-    <PackageReference Include="Tmds.DBus" />
   </ItemGroup>
 
   <ItemGroup>
@@ -31,5 +32,7 @@
   <ItemGroup>
     <AvaloniaResource Include="Assets\**" />
   </ItemGroup>
+
+  <Import Project="../SyncClipboard.Updater.Core/Updater.targets" />
 
 </Project>

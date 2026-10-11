@@ -1,14 +1,22 @@
-﻿using System;
+using System;
+using Avalonia.Controls;
+using Avalonia.Input.Platform;
 using Microsoft.Extensions.DependencyInjection;
 using SharpHook;
-using SyncClipboard.Abstract;
-using SyncClipboard.Abstract.Notification;
 using SyncClipboard.Core;
 using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Desktop.ClipboardAva;
+using SyncClipboard.Desktop.ClipboardAva.ClipboardReader;
+using SyncClipboard.Desktop.ClipboardAva.ClipboardWriter;
+using SyncClipboard.Desktop.ClipboardAva.Fingerprint;
 using SyncClipboard.Desktop.Utilities;
+using SyncClipboard.Desktop.Utilities.CaretPositionProvider;
+using SyncClipboard.Desktop.Utilities.NativeWindowController;
+using SyncClipboard.Desktop.Utilities.MousePositionProvider;
 using SyncClipboard.Desktop.Views;
+using SyncClipboard.Desktop.ViewModels;
+using SyncClipboard.Core.Utilities.Network;
 
 namespace SyncClipboard.Desktop;
 
@@ -18,34 +26,85 @@ public class AppServices
     {
         AppCore.ConfigCommonService(services);
         AppCore.ConfigurateViewModels(services);
+        services.AddSingleton<DiagnoseViewModel>();
         AppCore.ConfigurateUserService(services);
 
         services.AddTransient<IAppConfig, AppConfig>();
+        services.AddSingleton<IPlatformApplication, PlatformApplication>();
 
+        services.AddSingleton<IGlobalDialog, Services.AvaloniaGlobalDialog>();
+        services.AddSingleton<IMainWindowDialog, Services.AvaloniaDialog>();
+        services.AddSingleton<IHistoryExportDialog, HistoryExportDialogPresenter>();
+        services.AddKeyedSingleton<IMainWindowDialog>("HistoryWindow", (sp, key) =>
+        {
+            var historyWindow = sp.GetRequiredKeyedService<IWindow>("HistoryWindow") as HistoryWindow;
+            return new Services.AvaloniaDialog(historyWindow!);
+        });
         services.AddSingleton<IContextMenu, TrayIconContextMenu>();
+        services.AddSingleton<IClipboard>(sp =>
+            ((Window)sp.GetRequiredService<IMainWindow>()).Clipboard
+            ?? throw new InvalidOperationException("Main window clipboard is unavailable."));
+        services.AddSingleton<ClipboardReaderSelector>();
+        services.AddSingleton<ClipboardWriterSelector>();
+        services.AddSingleton<IClipboardWriteCapabilities>(sp => sp.GetRequiredService<ClipboardWriterSelector>());
+        services.AddSingleton<IClipboardWriter, AvaloniaClipboardWriter>();
+        services.AddSingleton<IClipboardReader, AvaloniaClipboardReader>();
 
-        services.AddSingleton<ClipboardFactory>();
-        services.AddSingleton<IClipboardFactory>(sp => sp.GetRequiredService<ClipboardFactory>());
-        services.AddSingleton<IProfileDtoHelper>(sp => sp.GetRequiredService<ClipboardFactory>());
-        services.AddSingleton<IClipboardChangingListener, ClipboardListener>();
+        // 注册剪贴板指纹提供者
+        if (OperatingSystem.IsLinux())
+        {
+            services.AddSingleton<IWifiNetworkInfoProvider, LinuxWifiNetworkInfoProvider>();
+            services.AddSingleton<IClipboardFingerprintProvider, LinuxClipboardFingerprintProvider>();
+        }
+        else if (OperatingSystem.IsMacOS())
+        {
+            services.AddSingleton<IClipboardFingerprintProvider, MacOSClipboardFingerprintProvider>();
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            services.AddSingleton<IClipboardFingerprintProvider, WindowsClipboardFingerprintProvider>();
+        }
+
+        services.AddSingleton<IClipboardFactory, ClipboardFactory>();
+        services.AddSingleton<ClipboardListener>();
+        services.AddSingleton<IClipboardChangingListener>(sp => sp.GetRequiredService<ClipboardListener>());
+        services.AddSingleton<IClipboardMoniter>(sp => sp.GetRequiredService<ClipboardListener>());
         services.AddTransient<IClipboardSetter<TextProfile>, TextClipboardSetter>();
         services.AddTransient<IClipboardSetter<FileProfile>, FileClipboardSetter>();
         services.AddTransient<IClipboardSetter<ImageProfile>, ImageClipboardSetter>();
         services.AddTransient<IClipboardSetter<GroupProfile>, FileClipboardSetter>();
 
-        services.AddSingleton<INativeHotkeyRegistry, SharpHookHotkeyRegistry>();
-        services.AddSingleton<IGlobalHook>((sp) => new SimpleGlobalHook(true));
+        services.AddSingleton<IGlobalHook>(_ => new SimpleGlobalHook());
 
         services.AddTransient<IFontManager, FontManager>();
+        services.AddTransient<IThreadDispatcher, ThreadDispatcher>();
 
-        if (!OperatingSystem.IsMacOS() && !OperatingSystem.IsLinux())
+        if (OperatingSystem.IsLinux())
         {
-            services.AddSingleton<INotification, Notification>();
+            services.AddSingleton<IClipboardReader, XClipReader>();
+            services.AddSingleton<IClipboardReader, WlClipboardReader>();
+            services.AddSingleton<IClipboardWriter, WlClipboardWriter>();
+            services.AddSingleton<ICaretPositionProvider, CaretPositionProvider>();
+            services.AddSingleton<INativeWindowController, LinuxNativeWindowController>();
+            services.AddSingleton<INativeForegroundWindowWatcher, PollingForegroundWindowWatcher>();
+            services.AddSingleton<IMousePositionProvider, MousePositionProvider>();
+        }
+
+        if (OperatingSystem.IsWindows())
+        {
+            services.AddSingleton<IWifiNetworkInfoProvider, WindowsWifiNetworkInfoProvider>();
+            services.AddSingleton<ICaretPositionProvider, FakeCaretPositionProvider>();
+            services.AddSingleton<INativeWindowController, WindowsNativeWindowController>();
+            services.AddSingleton<INativeForegroundWindowWatcher, WindowsForegroundWindowWatcher>();
+            services.AddSingleton<IMousePositionProvider, FakeMousePositionProvider>();
         }
 
         if (!OperatingSystem.IsMacOS())
         {
             services.AddSingleton<IMainWindow, MainWindow>();
+            services.AddSingleton<INativeHotkeyRegistry, SharpHookHotkeyRegistry>();
+            services.AddSingleton<IClipboardOwnerProvider, ClipboardOwnerProvider>();
+            services.AddKeyedSingleton<IWindow, HistoryWindow>("HistoryWindow");
         }
     }
 

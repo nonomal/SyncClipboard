@@ -1,12 +1,12 @@
-﻿using SyncClipboard.Abstract;
-using SyncClipboard.Core.Utilities;
-
 namespace SyncClipboard.Core.Models;
 
 public record class ClipboardMetaInfomation
 {
     public const string ImageType = "Image";
 
+    public int? TimeStamp;
+    public bool? ExcludeForSync;
+    public bool? ExcludeForHistory;
     public string? Text;
     public string? Html;
     public IClipboardImage? Image;
@@ -25,15 +25,23 @@ public record class ClipboardMetaInfomation
     }
     public DragDropEffects? Effects;
     public string? OriginalType;
+    public WindowInfo? Owner;
 
     public virtual bool Equals(ClipboardMetaInfomation? other)
     {
+        if (TimeStamp is not null && other?.TimeStamp is not null)
+        {
+            return TimeStamp == other.TimeStamp;
+        }
+
         return (object)this == other ||
             (other is not null
             && EqualityContract == other.EqualityContract
+            && EqualityComparer<bool?>.Default.Equals(ExcludeForSync, other.ExcludeForSync)
+            && EqualityComparer<bool?>.Default.Equals(ExcludeForHistory, other.ExcludeForHistory)
             && EqualityComparer<string>.Default.Equals(Text, other.Text)
             && EqualityComparer<string>.Default.Equals(Html, other.Html)
-            //&& EqualityComparer<IClipboardImage>.Default.Equals(Image, other.Image)
+            && EqualityComparer<IClipboardImage>.Default.Equals(Image, other.Image)
             && SameFIles(other.Files)
             && EqualityComparer<DragDropEffects?>.Default.Equals(Effects, other.Effects)
             && EqualityComparer<string>.Default.Equals(OriginalType, other.OriginalType));
@@ -47,21 +55,37 @@ public record class ClipboardMetaInfomation
 
     public override int GetHashCode()
     {
-        List<int> hashList = new()
+        if (TimeStamp is not null)
         {
+            return TimeStamp.Value;
+        }
+
+        List<int> hashList =
+        [
             EqualityContract.GetHashCode(),
             Text?.GetHashCode() ?? 0,
             Html?.GetHashCode() ?? 0,
             Files?.ListHashCode() ?? 0,
             Effects?.GetHashCode() ?? 0,
             OriginalType?.GetHashCode() ?? 0,
-        };
+            Image?.GetHashCode() ?? 0,
+        ];
 
         return hashList.ListHashCode();
     }
 
     public override string ToString()
     {
-        return $"Text={Text} Html={Html} Files='{string.Join(',', Files ?? Array.Empty<string>())}' DragDropEffects={Effects} OriginalType={OriginalType}";
+        string? displayText = Text is { Length: > 100 } ? Text[..100] + "..." : Text;
+        string ownerInfo = Owner is { } owner
+            ? $"ProcessName='{owner.ProcessName}' ExecutableName='{owner.ExecutableName}' WindowTitle='{owner.WindowTitle}'"
+            : "Unknown";
+        return $"Text={displayText} Html={Html} Files='{string.Join(',', Files ?? [])}' " +
+            $"DragDropEffects={Effects} OriginalType={OriginalType} Owner=[{ownerInfo}]";
+    }
+
+    public bool Empty()
+    {
+        return Text is null && Html is null && Files is null && Image is null;
     }
 }

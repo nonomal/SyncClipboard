@@ -6,11 +6,11 @@ namespace SyncClipboard.Core.I18n;
 public class I18nHelper
 {
     public static readonly LanguageModel[] SupportedLanguage =
-    {
+    [
         new LanguageModel(Strings.DefaultLanguage, "", true),
         new LanguageModel("English", "en-US"),
         new LanguageModel("简体中文", "zh-CN")
-    };
+    ];
 
     private static CultureInfo? DefaultUICulture;
     public static void SaveDefaultUICultureInfo()
@@ -32,5 +32,16 @@ public class I18nHelper
         var newCulture = new CultureInfo(languageTag);
         CultureInfo.CurrentUICulture = newCulture;
         CultureInfo.DefaultThreadCurrentUICulture = newCulture;
+    }
+
+    public static string GetString(SyncStatus status)
+    {
+        return status switch
+        {
+            SyncStatus.Synced => "已同步",
+            SyncStatus.LocalOnly => "仅本地：可上传",
+            SyncStatus.ServerOnly => "仅服务器：可下载",
+            _ => "状态未知",
+        };
     }
 }

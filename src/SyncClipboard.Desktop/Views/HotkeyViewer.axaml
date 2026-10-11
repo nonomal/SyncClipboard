@@ -41,11 +41,13 @@
             </OnPlatform>
         </Style>
     </UserControl.Styles>
-    <ItemsRepeater HorizontalAlignment="Center" ItemsSource="{Binding #_HotkeyViewer.Hotkey.Keys, Mode=OneWay}">
-        <ItemsRepeater.Layout>
-            <StackLayout Orientation="Horizontal" Spacing="4" />
-        </ItemsRepeater.Layout>
-        <ItemsRepeater.ItemTemplate>
+    <ItemsControl HorizontalAlignment="Center" ItemsSource="{Binding #_HotkeyViewer.Hotkey.Keys, Mode=OneWay}">
+        <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+                <StackPanel Orientation="Horizontal" Spacing="4" />
+            </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
             <DataTemplate x:DataType="mk:Key">
                 <ToggleButton MinWidth="{Binding $self.Bounds.Height, Mode=OneWay}"
                               VerticalAlignment="Stretch"
@@ -54,6 +56,6 @@
                               IsHitTestVisible="False"
                               Content="{Binding Converter={StaticResource KeyToJsonStringConverter}}" />
             </DataTemplate>
-        </ItemsRepeater.ItemTemplate>
-    </ItemsRepeater>
+        </ItemsControl.ItemTemplate>
+    </ItemsControl>
 </UserControl>

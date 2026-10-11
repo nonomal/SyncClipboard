@@ -9,7 +9,7 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "DebugMacos",
-            "program": "${workspaceFolder}/SyncClipboard.Desktop.MacOS/bin/Debug/net8.0-macos/osx-x64/SyncClipboard.Desktop.MacOS.app/Contents/MacOS/SyncClipboard.Desktop.MacOS",
+            "program": "${workspaceFolder}/SyncClipboard.Desktop.MacOS/bin/Debug/net10.0-macos/osx-arm64/SyncClipboard.Desktop.MacOS.app/Contents/MacOS/SyncClipboard.Desktop.MacOS",
             "args": [],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
@@ -20,31 +20,30 @@
             }
         },
         {
-            "name": "DebugDesktop",
+            "name": "DebugLinux",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": "DebugDesktop",
+            "preLaunchTask": "DebugLinux",
             "program": "dotnet",
             "args": [
-                "${workspaceFolder}/SyncClipboard.Desktop.Default/bin/Debug/net6.0/SyncClipboard.Desktop.Default.dll"
+                "${workspaceFolder}/SyncClipboard.Desktop.Default/bin/Debug/net10.0/SyncClipboard.Desktop.Default.dll"
             ],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopAtEntry": false,
             "internalConsoleOptions": "openOnSessionStart",
             "env": {
-                "ASPNETCORE_ENVIRONMENT": "Development",
-                "LANG": "en_US.UTF-8"
+                "ASPNETCORE_ENVIRONMENT": "Development"
             }
         },
         {
             "name": "DebugDesktopRemote",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": "DebugDesktop",
+            "preLaunchTask": "DebugLinux",
             "program": "dotnet",
             "args": [
-                "${workspaceFolder}/SyncClipboard.Desktop.Default/bin/Debug/net6.0/publish/SyncClipboard.Desktop.Default.dll"
+                "${workspaceFolder}/SyncClipboard.Desktop.Default/bin/Debug/net10.0/SyncClipboard.Desktop.Default.dll"
             ],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
@@ -52,8 +51,7 @@
             "internalConsoleOptions": "openOnSessionStart",
             "env": {
                 "ASPNETCORE_ENVIRONMENT": "Development",
-                "LANG": "en_US.UTF-8",
-                "DISPLAY": ":2"
+                "DISPLAY": ":0"
             }
         },
         {
@@ -61,7 +59,7 @@
             "type": "coreclr",
             "request": "launch",
             "preLaunchTask": "ReleaseAva",
-            "program": "${workspaceFolder}/SyncClipboard.Desktop/bin/Release/net6.0/linux-x64/publish/SyncClipboard.Desktop",
+            "program": "${workspaceFolder}/SyncClipboard.Desktop.Default/bin/Release/net10.0/linux-x64/publish/SyncClipboard.Desktop.Default",
             "args": [],
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
@@ -76,10 +74,10 @@
             "name": "Debug server",
             "type": "coreclr",
             "request": "launch",
-            "preLaunchTask": "Debug",
+            "preLaunchTask": "Debug Server",
             "program": "dotnet",
             "args": [
-                "${workspaceFolder}/SyncClipboard.Server/bin/Debug/net6.0/publish/SyncClipboard.Server.dll",
+                "${workspaceFolder}/SyncClipboard.Server/bin/debug/net10.0/SyncClipboard.Server.dll",
                 "--contentRoot",
                 "./"
             ],
@@ -98,7 +96,7 @@
             "preLaunchTask": "Release",
             "program": "dotnet",
             "args": [
-                "${workspaceFolder}/SyncClipboard.Server/bin/Release/net6.0/publish/SyncClipboard.Server.dll",
+                "${workspaceFolder}/SyncClipboard.Server/bin/release/net10.0/publish/SyncClipboard.Server.dll",
                 "--contentRoot",
                 "./"
             ],
@@ -115,7 +113,7 @@
             "type": "coreclr",
             "preLaunchTask": "Build Debug WinUI",
             "request": "launch",
-            "program": "SyncClipboard.WinUI3/bin/x64/Debug/net6.0-windows10.0.19041.0/win10-x64/SyncClipboard.exe",
+            "program": "SyncClipboard.WinUI3/bin/x64/Debug/net10.0-windows10.0.19041.0/win-x64/SyncClipboard.exe",
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopAtEntry": false,
@@ -129,7 +127,7 @@
             "type": "coreclr",
             "preLaunchTask": "Build Release WinUI",
             "request": "launch",
-            "program": "SyncClipboard.WinUI3/bin/x64/Release/net6.0-windows10.0.19041.0/win10-x64/SyncClipboard.exe",
+            "program": "SyncClipboard.WinUI3/bin/x64/Release/net10.0-windows10.0.19041.0/win-x64/SyncClipboard.exe",
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopAtEntry": false,

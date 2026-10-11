@@ -1,56 +1,100 @@
 ﻿using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
+using SyncClipboard.Core.Utilities;
 
 namespace SyncClipboard.Core.Clipboard;
 
-public abstract class ClipboardChangingListenerBase : IClipboardChangingListener, IDisposable
+public abstract class ClipboardChangingListenerBase : IClipboardChangingListener, IClipboardMoniter, IDisposable
 {
-    private readonly object _countLocker = new object();
-    private int _count = 0;
+    private static readonly TimeSpan ClipboardReadTimeout = TimeSpan.FromSeconds(10);
 
-    protected abstract void RegistSystemEvent(Action<ClipboardMetaInfomation> action);
-    protected abstract void UnRegistSystemEvent(Action<ClipboardMetaInfomation> action);
+    private bool _registed = false;
 
-    private event Action<ClipboardMetaInfomation>? ChangedImpl;
-    public event Action<ClipboardMetaInfomation>? Changed
+    protected delegate void MetaChanged(ClipboardMetaInfomation? meta);
+    protected abstract void RegistSystemEvent(MetaChanged action);
+    protected abstract void UnRegistSystemEvent(MetaChanged action);
+    protected abstract IClipboardFactory ClipboardFactory { get; }
+
+    private event ClipboardChangedDelegate? ChangedImpl;
+    public event ClipboardChangedDelegate? Changed
     {
         add
         {
-            lock (_countLocker)
-            {
-                if (_count == 0)
-                {
-                    _count++;
-                    RegistSystemEvent(NotifyAll);
-                }
-            }
             ChangedImpl += value;
+            AddRef();
         }
         remove
         {
             ChangedImpl -= value;
-            lock (_countLocker)
+            ReleaseRef();
+        }
+    }
+
+    private event Action? ClipboardChangedImpl;
+    public event Action? ClipboardChanged
+    {
+        add
+        {
+            ClipboardChangedImpl += value;
+            AddRef();
+        }
+        remove
+        {
+            ClipboardChangedImpl -= value;
+            ReleaseRef();
+        }
+    }
+
+    private void AddRef()
+    {
+        lock (this)
+        {
+            if (_registed)
+                return;
+            if (HasClipboardHandler())
             {
-                _count--;
-                if (_count == 0)
-                {
-                    UnRegistSystemEvent(NotifyAll);
-                }
+                RegistSystemEvent(NotifyAll);
+                _registed = true;
             }
         }
     }
 
-    private Action<ClipboardMetaInfomation> NotifyAll => (meta) =>
+    private void ReleaseRef()
     {
+        lock (this)
+        {
+            if (!_registed)
+                return;
+            if (HasClipboardHandler() is false)
+            {
+                UnRegistSystemEvent(NotifyAll);
+                _registed = false;
+            }
+        }
+    }
+
+    private bool HasClipboardHandler()
+    {
+        return ClipboardChangedImpl?.GetInvocationList().Length > 0 || ChangedImpl?.GetInvocationList().Length > 0;
+    }
+
+    private async void NotifyAll(ClipboardMetaInfomation? meta)
+    {
+        using var cancellationSource = new CancellationTokenSource(ClipboardReadTimeout);
+        var token = cancellationSource.Token;
+
         try
         {
-            ChangedImpl?.Invoke(meta);
+            ClipboardChangedImpl?.GetInvocationList()?.ForEach(delegt => delegt.InvokeNoExcept());
+            meta ??= await ClipboardFactory.GetMetaInfomation(token);
+            var profile = await ClipboardFactory.CreateProfileFromMeta(meta, token);
+            ChangedImpl?.GetInvocationList()?.ForEach(delegt => delegt.InvokeNoExcept(meta, profile));
         }
         catch (Exception ex)
         {
             AppCore.Current?.Logger.Write($"Clipboard handler unhandled exception {ex.Message}\n{ex.StackTrace}");
         }
-    };
+    }
 
     ~ClipboardChangingListenerBase() => Dispose();
 
@@ -58,7 +102,6 @@ public abstract class ClipboardChangingListenerBase : IClipboardChangingListener
     {
         ChangedImpl = null;
         UnRegistSystemEvent(NotifyAll);
-        _count = 0;
         GC.SuppressFinalize(this);
     }
 }

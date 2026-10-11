@@ -1,8 +1,9 @@
 ﻿using AppKit;
+using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
+using SyncClipboard.Desktop.MacOS.Utilities;
 using System;
-using System.Linq;
 
 namespace SyncClipboard.Desktop.MacOS.Views;
 
@@ -10,32 +11,32 @@ public class MainWindow : Desktop.Views.MainWindow
 {
     public MainWindow()
     {
-        if (App.Current.ApplicationLifetime is not IActivatableApplicationLifetime lifetime)
-        {
-            throw new NotSupportedException("Mac AppLifetime wrong.");
-        }
+        var lifetime = App.Current.TryGetFeature<IActivatableLifetime>()
+            ?? throw new NotSupportedException("Mac AppLifetime wrong.");
         lifetime.Activated += Lifitime_Activated;
     }
 
     private void Lifitime_Activated(object? sender, ActivatedEventArgs e)
     {
-        ShowMainWindow();
+        if (e.Kind == ActivationKind.Reopen)
+        {
+            if (ApplicationActivationHelper.ActiveWindows.Count == 0)
+            {
+                ShowMainWindow();
+            }
+        }
     }
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        NSApplication.SharedApplication.ActivationPolicy = NSApplicationActivationPolicy.Accessory;
+        this.RemoveWindow();
         base.OnClosing(e);
     }
 
     protected override void ShowMainWindow()
     {
-        NSApplication.SharedApplication.ActivationPolicy = NSApplicationActivationPolicy.Regular;
-
-        // 这是一个workaround，切换NSApplicationActivationPolicy后系统菜单无法被点击，需要先Focus到其他App
-        NSRunningApplication.GetRunningApplications("com.apple.dock")
-            .FirstOrDefault()?.Activate(NSApplicationActivationOptions.ActivateIgnoringOtherWindows);
-
+        this.AddWindow();
+        this.FocusMenuBar();
         base.ShowMainWindow();
     }
 

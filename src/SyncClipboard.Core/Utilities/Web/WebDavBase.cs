@@ -1,8 +1,11 @@
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text.Encodings.Web;
 using System.Text.Json;
+using System.Text.Unicode;
 using System.Web;
 using System.Xml;
 
@@ -12,10 +15,16 @@ namespace SyncClipboard.Core.Utilities.Web
     {
         private string USER_AGENT => AppConfig.AppStringId + AppConfig.AppVersion;
 
+        private static readonly JsonSerializerOptions SerializerOptions = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            WriteIndented = true,
+            Encoder = JavaScriptEncoder.Create(UnicodeRanges.All)
+        };
+
         protected ILogger? Logger;
         protected abstract IAppConfig AppConfig { get; }
 
-        protected virtual uint Timeout => 300;
+        public virtual uint Timeout { get; init; } = 300;
         protected abstract string User { get; }
         protected abstract string Token { get; }
         protected abstract string BaseAddress { get; }
@@ -30,6 +39,8 @@ namespace SyncClipboard.Core.Utilities.Web
                 return _prefix;
             }
         }
+
+        private IWebProxy _proxy = new WebProxy();
 
         private HttpClient? httpClient;
         private HttpClient HttpClient
@@ -52,13 +63,30 @@ namespace SyncClipboard.Core.Utilities.Web
 
         protected void ReInitHttpClient()
         {
-            HttpClient = CreateHttpClient();
+            var newClient = CreateHttpClient();
+            var oldClient = HttpClient;
+            HttpClient = newClient;
+            oldClient?.Dispose();
             SetAuthHeader();
         }
 
-        private HttpClient CreateHttpClient()
+        public void SetProxy(IWebProxy proxy)
         {
-            var httpclientHandler = new HttpClientHandler();
+            _proxy = proxy;
+            // 如果 HttpClient 已经懒加载过，立即重建以应用新代理；
+            // 如果还未创建，下次懒加载时自然会使用新 _proxy，无需主动重建。
+            if (httpClient is not null)
+            {
+                ReInitHttpClient();
+            }
+        }
+
+        protected virtual HttpClient CreateHttpClient()
+        {
+            var httpclientHandler = new HttpClientHandler
+            {
+                Proxy = _proxy // 显式应用代理
+            };
             if (TrustInsecureCertificate)
             {
                 httpclientHandler.ServerCertificateCustomValidationCallback = delegate { return true; };
@@ -91,75 +119,134 @@ namespace SyncClipboard.Core.Utilities.Web
                 = new AuthenticationHeaderValue("Basic", Convert.ToBase64String(bytes));
         }
 
-        public Task GetFile(string url, string localFilePath, CancellationToken? cancelToken = null)
+        public async Task GetFile(string url, string localFilePath, CancellationToken? cancelToken = null)
         {
-            return HttpClient.GetFile(url, localFilePath, AdjustCancelToken(cancelToken));
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            await HttpClient.GetFile(url, localFilePath, cancellationSource.Token);
         }
 
-        public Task GetFile(string url, string localFilePath, IProgress<HttpDownloadProgress>? progress = null,
+        public async Task GetFile(string url, string localFilePath, IProgress<HttpDownloadProgress>? progress = null,
             CancellationToken? cancelToken = null)
         {
-            return HttpClient.GetFile(url, localFilePath, progress, AdjustCancelToken(cancelToken));
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            await HttpClient.GetFile(url, localFilePath, progress, cancellationSource.Token);
         }
 
         public async Task PutFile(string url, string localFilePath, CancellationToken? cancelToken = null)
         {
-            using var fileStream = new FileStream(localFilePath, FileMode.Open, FileAccess.Read);
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var fileStream = new FileStream(localFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
             using var streamContent = new StreamContent(fileStream);
-            await HttpClient.PutAsync(url, streamContent, AdjustCancelToken(cancelToken));
+            using var response = await HttpClient.PutAsync(url, streamContent, cancellationSource.Token);
         }
 
-        public Task<string> GetText(string url, CancellationToken? cancelToken = null)
+        public async Task PutFile(string url, string localFilePath, IProgress<HttpDownloadProgress>? progress, CancellationToken? cancelToken = null)
         {
-            return HttpClient.GetStringAsync(url, AdjustCancelToken(cancelToken));
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var fileStream = new FileStream(localFilePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            using HttpContent streamContent = progress is null
+                ? new StreamContent(fileStream)
+                : new ProgressableStreamContent(fileStream, progress, cancellationSource.Token);
+            using var response = await HttpClient.PutAsync(url, streamContent, cancellationSource.Token);
+        }
+
+        public async Task<string> GetText(string url, CancellationToken? cancelToken = null)
+        {
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            return await HttpClient.GetStringAsync(url, cancellationSource.Token);
         }
 
         public async Task PutText(string url, string text, CancellationToken? cancelToken = null)
         {
-            var res = await HttpClient.PutAsync(url, new StringContent(text), AdjustCancelToken(cancelToken));
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var content = new StringContent(text);
+            using var res = await HttpClient.PutAsync(url, content, cancellationSource.Token);
             res.EnsureSuccessStatusCode();
         }
 
-        public Task<Type?> GetJson<Type>(string url, CancellationToken? cancelToken = null)
+        public async Task<Type?> GetJson<Type>(string url, CancellationToken? cancelToken = null)
         {
-            return HttpClient.GetFromJsonAsync<Type>(
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            return await HttpClient.GetFromJsonAsync<Type>(
                 url,
-                new JsonSerializerOptions(JsonSerializerDefaults.General),
-                AdjustCancelToken(cancelToken)
+                SerializerOptions,
+                cancellationSource.Token
             );
         }
 
-        public Task PutJson<Type>(string url, Type jsonContent, CancellationToken? cancelToken = null)
+        public async Task<(Type? Value, string? Version)> GetJsonWithVersion<Type>(
+            string url,
+            CancellationToken? cancelToken = null)
         {
-            return HttpClient.PutAsJsonAsync(
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var response = await HttpClient.GetAsync(url, cancellationSource.Token);
+            response.EnsureSuccessStatusCode();
+            var value = await response.Content.ReadFromJsonAsync<Type>(
+                SerializerOptions,
+                cancellationSource.Token);
+            return (value, response.Headers.ETag?.ToString());
+        }
+
+        public async Task PutJson<Type>(string url, Type jsonContent, CancellationToken? cancelToken = null)
+        {
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var content = JsonContent.Create(jsonContent, null, SerializerOptions);
+            await content.LoadIntoBufferAsync(); // avoid chunked encoding
+            using var response = await HttpClient.PutAsync(
                 url,
-                jsonContent,
-                new JsonSerializerOptions(JsonSerializerDefaults.General),
-                AdjustCancelToken(cancelToken)
+                content,
+                cancellationSource.Token
             );
         }
 
-        private CancellationToken AdjustCancelToken(CancellationToken? cancelToken = null)
+        public async Task<bool> PutJsonIfVersion<Type>(
+            string url,
+            Type jsonContent,
+            string? expectedVersion,
+            CancellationToken? cancelToken = null)
         {
-            return CancellationTokenSource.CreateLinkedTokenSource(
-                cancelToken ?? CancellationToken.None,
-                new CancellationTokenSource(TimeSpan.FromSeconds(Timeout)).Token
-            ).Token;
+            if (string.IsNullOrWhiteSpace(expectedVersion))
+            {
+                return false;
+            }
+
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var request = new HttpRequestMessage(HttpMethod.Put, url);
+            request.Headers.TryAddWithoutValidation("If-Match", expectedVersion);
+            request.Content = JsonContent.Create(jsonContent, null, SerializerOptions);
+            await request.Content.LoadIntoBufferAsync(); // avoid chunked encoding
+            using var response = await HttpClient.SendAsync(request, cancellationSource.Token);
+            if (response.StatusCode is HttpStatusCode.PreconditionFailed or HttpStatusCode.Conflict)
+            {
+                return false;
+            }
+
+            response.EnsureSuccessStatusCode();
+            return true;
+        }
+
+        private CancellationTokenSource CreateRequestCancellationSource(CancellationToken? cancelToken = null)
+        {
+            var cancellationSource = CancellationTokenSource.CreateLinkedTokenSource(cancelToken ?? CancellationToken.None);
+            cancellationSource.CancelAfter(TimeSpan.FromSeconds(Timeout));
+            return cancellationSource;
         }
 
         public async Task<bool> Exist(string url, CancellationToken? cancelToken = null)
         {
-            var requestMessage = new HttpRequestMessage(new HttpMethod("PROPFIND"), url);
-            var res = await HttpClient.SendAsync(requestMessage, AdjustCancelToken(cancelToken));
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var requestMessage = new HttpRequestMessage(new HttpMethod("HEAD"), url);
+            using var res = await HttpClient.SendAsync(requestMessage, cancellationSource.Token);
             return EnsureExist(res);
         }
 
         public async Task<bool> DirectoryExist(string url, CancellationToken? cancelToken = null)
         {
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
             AdjustDirectoryUrl(ref url);
-            var requestMessage = new HttpRequestMessage(new HttpMethod("PROPFIND"), url);
+            using var requestMessage = new HttpRequestMessage(new HttpMethod("PROPFIND"), url);
             requestMessage.Headers.Add("Depth", "1");
-            var res = await HttpClient.SendAsync(requestMessage, AdjustCancelToken(cancelToken));
+            using var res = await HttpClient.SendAsync(requestMessage, cancellationSource.Token);
             return EnsureExist(res);
         }
 
@@ -175,44 +262,51 @@ namespace SyncClipboard.Core.Utilities.Web
 
         public async Task CreateDirectory(string url, CancellationToken? cancelToken = null)
         {
-            var requestMessage = new HttpRequestMessage(new HttpMethod("MKCOL"), url);
-            var res = await HttpClient.SendAsync(requestMessage, AdjustCancelToken(cancelToken));
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var requestMessage = new HttpRequestMessage(new HttpMethod("MKCOL"), url);
+            using var res = await HttpClient.SendAsync(requestMessage, cancellationSource.Token);
             res.EnsureSuccessStatusCode();
         }
 
-        public async Task<bool> TestAlive(CancellationToken? cancelToken = null)
+        public async Task Test(CancellationToken? cancelToken = null)
         {
-            HttpRequestMessage requestMessage = new()
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using HttpRequestMessage requestMessage = new()
             {
                 Method = new HttpMethod("PROPFIND")
             };
             requestMessage.Headers.Add("Depth", "1");
 
+            using var res = await HttpClient.SendAsync(requestMessage, cancellationSource.Token);
+            res.EnsureSuccessStatusCode();
+        }
+
+        public async Task<bool> TestAlive(CancellationToken? cancelToken = null)
+        {
             try
             {
-                var res = await HttpClient.SendAsync(requestMessage, AdjustCancelToken(cancelToken));
-                res.EnsureSuccessStatusCode();
+                await Test(cancelToken);
+                return true;
             }
             catch (Exception ex)
             {
                 Logger?.Write("[WebDAV] Test WebDav Failed, message = " + ex.Message);
                 return false;
             }
-
-            Logger?.Write("Test ok ");
-            return true;
         }
 
         public async Task Delete(string url, CancellationToken? cancelToken = null)
         {
-            var res = await HttpClient.DeleteAsync(url, AdjustCancelToken(cancelToken));
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            using var res = await HttpClient.DeleteAsync(url, cancellationSource.Token);
             res.EnsureSuccessStatusCode();
         }
 
         public async Task DirectoryDelete(string url, CancellationToken? cancelToken = null)
         {
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
             AdjustDirectoryUrl(ref url);
-            var res = await HttpClient.DeleteAsync(url, AdjustCancelToken(cancelToken));
+            using var res = await HttpClient.DeleteAsync(url, cancellationSource.Token);
             res.EnsureSuccessStatusCode();
         }
 
@@ -226,28 +320,62 @@ namespace SyncClipboard.Core.Utilities.Web
 
         public async Task<List<WebDavNode>> GetFolderSubList(string url, CancellationToken? cancelToken = null)
         {
-            var token = AdjustCancelToken(cancelToken);
-            var requestMessage = new HttpRequestMessage(new HttpMethod("PROPFIND"), url);
-            var res = await HttpClient.SendAsync(requestMessage, token);
+            using var cancellationSource = CreateRequestCancellationSource(cancelToken);
+            var token = cancellationSource.Token;
+            using var requestMessage = new HttpRequestMessage(new HttpMethod("PROPFIND"), url);
+            requestMessage.Headers.Add("Depth", "1");
+            using var res = await HttpClient.SendAsync(requestMessage, token);
             res.EnsureSuccessStatusCode();
 
-            List<WebDavNode> list = new List<WebDavNode>();
+            List<WebDavNode> list = [];
 
             XmlDocument doc = new XmlDocument();
             doc.LoadXml(await res.Content.ReadAsStringAsync(token));
-            const string ns = "DAV:";
-            XmlNodeList elemList = doc.GetElementsByTagName("response", ns);
+
+            XmlNamespaceManager namespaceManager = new(doc.NameTable);
+            namespaceManager.AddNamespace("d", "DAV:");
+
+            XmlNodeList? elemList = doc.SelectNodes("//d:response", namespaceManager);
+            if (elemList is null || elemList.Count == 0)
+            {
+                return list;
+            }
             foreach (XmlNode elem in elemList)
             {
-                var fullPath = elem["d:href"]!.InnerText;
-                var relativePath = fullPath[Prefix.Length..];
-                var subName = relativePath[url.Length..];
-                subName = subName.Trim('/');
-                if (!string.IsNullOrEmpty(subName))
+                var hrefNode = elem.SelectSingleNode("d:href", namespaceManager);
+                if (hrefNode is null)
                 {
-                    var isFolder = elem["propstat", ns]?["prop", ns]?["resourcetype", ns]?["collection", ns];
-                    list.Add(new(relativePath, HttpUtility.UrlDecode(subName), isFolder is not null));
+                    continue;
                 }
+
+                var fullPath = hrefNode.InnerText.Trim();
+                if (string.IsNullOrEmpty(fullPath))
+                {
+                    continue;
+                }
+
+                var relativePath = fullPath.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase)
+                    ? fullPath[Prefix.Length..].Trim('/')
+                    : new Uri(fullPath).AbsolutePath.Trim('/');
+
+                var urlPath = url.Trim('/');
+                string subName;
+                if (relativePath.StartsWith(urlPath, StringComparison.OrdinalIgnoreCase))
+                {
+                    subName = relativePath[urlPath.Length..].Trim('/');
+                }
+                else
+                {
+                    subName = relativePath;
+                }
+
+                if (string.IsNullOrEmpty(subName))
+                {
+                    continue;
+                }
+
+                var isFolder = elem.SelectSingleNode("d:propstat/d:prop/d:resourcetype/d:collection", namespaceManager) is not null;
+                list.Add(new(relativePath, HttpUtility.UrlDecode(subName), isFolder));
             }
             return list;
         }

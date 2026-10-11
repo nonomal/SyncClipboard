@@ -1,28 +1,44 @@
+using Microsoft.Extensions.DependencyInjection;
+using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
 
-namespace SyncClipboard.Core.UserServices;
+namespace SyncClipboard.Core.UserServices.ClipboardService;
 
 abstract public class ClipboardHander : Service
 {
-    protected abstract bool SwitchOn { get; set; }
-    protected abstract ILogger Logger { get; }
     public abstract string SERVICE_NAME { get; }
     public abstract string LOG_TAG { get; }
+    protected abstract bool SwitchOn { get; set; }
+    protected virtual bool ToggleMenuSwitchOn { get => SwitchOn; set => SwitchOn = value; }
+    protected ILogger Logger { get; }
 
-    protected abstract IClipboardChangingListener ClipboardChangingListener { get; }
+    private readonly IServiceProvider sp = AppCore.Current.Services;
+    private IClipboardChangingListener ClipboardChangingListener { get; }
+    private IThreadDispatcher ThreadDispatcher { get; }
+    private IContextMenu ContextMenu => sp.GetRequiredService<IContextMenu>();
+    private ToggleMenuItem? ToggleMenuItem { get; set; }
+    protected virtual bool EnableToggleMenuItem => true;
+    protected string? ContextMenuGroupName { get; init; }
 
-    protected ToggleMenuItem? ToggleMenuItem { get; set; }
-    protected virtual string? ContextMenuGroupName { get; } = null;
-    protected abstract IContextMenu? ContextMenu { get; }
+    public ClipboardHander()
+    {
+        sp = AppCore.Current.Services;
+        Logger = sp.GetRequiredService<ILogger>();
+        ClipboardChangingListener = sp.GetRequiredService<IClipboardChangingListener>();
+        ThreadDispatcher = sp.GetRequiredService<IThreadDispatcher>();
+    }
 
     protected override void StartService()
     {
         ClipboardChangingListener.Changed += ClipBoardChangedHandler;
 
         Logger.Write(LOG_TAG, $"Service: {SERVICE_NAME} started");
-        ToggleMenuItem = new ToggleMenuItem(SERVICE_NAME, false, (status) => SwitchOn = status);
-        ContextMenu?.AddMenuItem(ToggleMenuItem, ContextMenuGroupName);
+        if (EnableToggleMenuItem)
+        {
+            ToggleMenuItem = new ToggleMenuItem(SERVICE_NAME, ToggleMenuSwitchOn, (status) => ToggleMenuSwitchOn = status);
+            ContextMenu?.AddMenuItem(ToggleMenuItem, ContextMenuGroupName);
+        }
         Load();
     }
 
@@ -40,9 +56,11 @@ abstract public class ClipboardHander : Service
 
     public override void Load()
     {
-        if (ToggleMenuItem is not null)
+        var toggleMenuItem = ToggleMenuItem;
+        if (toggleMenuItem is not null)
         {
-            ToggleMenuItem.Checked = SwitchOn;
+            var isChecked = ToggleMenuSwitchOn;
+            _ = ThreadDispatcher.RunOnMainThreadAsync(() => toggleMenuItem.Checked = isChecked);
         }
     }
 
@@ -53,7 +71,7 @@ abstract public class ClipboardHander : Service
     }
 
     private CancellationTokenSource? _cancelSource;
-    private readonly object _cancelSourceLocker = new();
+    private readonly Lock _cancelSourceLocker = new();
 
     protected virtual CancellationToken StopPreviousAndGetNewToken()
     {
@@ -68,19 +86,25 @@ abstract public class ClipboardHander : Service
         }
     }
 
-    private async void ClipBoardChangedHandler(ClipboardMetaInfomation clipboardMetaInfomation)
+    private async void ClipBoardChangedHandler(ClipboardMetaInfomation clipboardMetaInfomation, Profile profile)
     {
         if (SwitchOn)
         {
             CancellationToken cancelToken = StopPreviousAndGetNewToken();
             try
             {
-                await HandleClipboard(clipboardMetaInfomation, cancelToken);
+                await HandleClipboard(clipboardMetaInfomation, profile, cancelToken);
             }
-            catch (OperationCanceledException)
-            { }
+            catch when (cancelToken.IsCancellationRequested)
+            {
+                Logger.Write(LOG_TAG, $"Error: {SERVICE_NAME} {nameof(HandleClipboard)} Cancelled");
+            }
+            catch (Exception ex)
+            {
+                Logger.Write(LOG_TAG, $"Error: {SERVICE_NAME} {nameof(HandleClipboard)} {ex.Message}");
+            }
         }
     }
 
-    protected abstract Task HandleClipboard(ClipboardMetaInfomation clipboardMetaInfomation, CancellationToken token);
+    protected abstract Task HandleClipboard(ClipboardMetaInfomation clipboardMetaInfomation, Profile profile, CancellationToken token);
 }

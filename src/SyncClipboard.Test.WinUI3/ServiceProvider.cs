@@ -8,12 +8,12 @@ namespace SyncClipboard.Test.WinUI3;
 [TestClass]
 public class ServiceProvider
 {
-    IServiceProvider? Services { get; set; }
+    Microsoft.Extensions.DependencyInjection.ServiceProvider? Services { get; set; }
 
     [TestInitialize]
     public void InitializeServices()
     {
-        var servicesCollection = AppServices.ConfigureServices();
+        var servicesCollection = AppServices.ConfigureServices(new Mock<IThreadDispatcher>().Object);
         servicesCollection.AddSingleton<IMainWindow>(new Mock<IMainWindow>().Object);
         servicesCollection.AddSingleton<IContextMenu>(new Mock<IContextMenu>().Object);
         Services = servicesCollection.BuildServiceProvider();

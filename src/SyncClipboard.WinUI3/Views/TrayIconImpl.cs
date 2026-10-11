@@ -10,8 +10,6 @@ namespace SyncClipboard.WinUI3.Views;
 
 internal class TrayIconImpl : TrayIconBase<BitmapImage>
 {
-    public override event Action? MainWindowWakedUp;
-
     private readonly TrayIcon _trayIcon;
     private readonly ServiceStatusViewModel _serviceStatusViewModel;
     protected override ServiceStatusViewModel? ServiceStatusViewModel => _serviceStatusViewModel;
@@ -24,12 +22,14 @@ internal class TrayIconImpl : TrayIconBase<BitmapImage>
     protected override BitmapImage DefaultInactiveIcon => defaultInactiveIcon;
     protected override BitmapImage ErrorIcon => errorIcon;
     protected override BitmapImage ErrorInactiveIcon => errorInactiveIcon;
-    protected override int MaxToolTipLenth => 255;
+    protected override int MaxToolTipLenth => 1024;
 
     public TrayIconImpl(TrayIcon trayIcon, ServiceStatusViewModel serviceStatusViewModel)
     {
         _trayIcon = trayIcon;
-        _trayIcon.DoubleClickCommand = new RelayCommand(() => MainWindowWakedUp?.Invoke());
+        _trayIcon.NoLeftClickDelay = true;
+        _trayIcon.LeftClickCommand = new RelayCommand(OnRawLeftClicked);
+        _trayIcon.DoubleClickCommand = new RelayCommand(OnRawLeftClicked);
         _serviceStatusViewModel = serviceStatusViewModel;
     }
 
@@ -54,11 +54,22 @@ internal class TrayIconImpl : TrayIconBase<BitmapImage>
         }
         else
         {
-            _trayIcon.DispatcherQueue.EnqueueAsync(() => _trayIcon.IconSource = icon).Wait();
+            _trayIcon.DispatcherQueue.EnqueueAsync(() => _trayIcon.IconSource = icon);
         }
     }
 
     protected override BitmapImage[] UploadIcons()
+    {
+        if (_trayIcon.DispatcherQueue.HasThreadAccess)
+        {
+            return CreateUploadIcons();
+        }
+        BitmapImage[]? icons = null;
+        _trayIcon.DispatcherQueue.EnqueueAsync(() => icons = CreateUploadIcons()).Wait();
+        return icons!;
+    }
+
+    private BitmapImage[] CreateUploadIcons()
     {
         return Enumerable.Range(1, 17)
             .Select(x => $"ms-appx:///Assets/upload{x:d3}.ico")
@@ -68,24 +79,32 @@ internal class TrayIconImpl : TrayIconBase<BitmapImage>
 
     protected override BitmapImage[] DownloadIcons()
     {
+        if (_trayIcon.DispatcherQueue.HasThreadAccess)
+        {
+            return CreateDownloadIcons();
+        }
+        BitmapImage[]? icons = null;
+        _trayIcon.DispatcherQueue.EnqueueAsync(() => icons = CreateDownloadIcons()).Wait();
+        return icons!;
+    }
+
+    private BitmapImage[] CreateDownloadIcons()
+    {
         return Enumerable.Range(1, 17)
-           .Select(x => $"ms-appx:///Assets/download{x:d3}.ico")
-           .Select(x => new BitmapImage(new Uri(x)))
-           .ToArray();
+            .Select(x => $"ms-appx:///Assets/download{x:d3}.ico")
+            .Select(x => new BitmapImage(new Uri(x)))
+            .ToArray();
     }
 
     protected override void SetToolTip(string text)
     {
-        _trayIcon.ToolTipText = text;
-    }
-
-    public override void SetStatusString(string key, string statusStr, bool error)
-    {
-        base.SetStatusString(key, statusStr, error);
-    }
-
-    public override void SetStatusString(string key, string statusStr)
-    {
-        base.SetStatusString(key, statusStr);
+        if (_trayIcon.DispatcherQueue.HasThreadAccess)
+        {
+            _trayIcon.ToolTipText = text;
+        }
+        else
+        {
+            _ = _trayIcon.DispatcherQueue.EnqueueAsync(() => _trayIcon.ToolTipText = text);
+        }
     }
 }

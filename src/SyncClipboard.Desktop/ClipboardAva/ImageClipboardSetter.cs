@@ -1,36 +1,76 @@
 ﻿using Avalonia.Input;
+using Avalonia.Media.Imaging;
 using ImageMagick;
 using SyncClipboard.Core.Clipboard;
+using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Runtime.Versioning;
+using System.Threading.Tasks;
 
 namespace SyncClipboard.Desktop.ClipboardAva;
 
-internal class ImageClipboardSetter : FileClipboardSetter, IClipboardSetter<Core.Clipboard.ImageProfile>
+internal class ImageClipboardSetter(ILogger logger) : FileClipboardSetter, IClipboardSetter<SyncClipboard.Shared.Profiles.ImageProfile>
 {
-    protected override DataObject CreatePackage(ClipboardMetaInfomation metaInfomation)
+    private readonly ILogger _logger = logger;
+    private const string LOG_TAG = nameof(ImageClipboardSetter);
+
+    public override async Task FillPackage(object package, ClipboardMetaInfomation metaInfomation)
     {
-        var dataObject = base.CreatePackage(metaInfomation);
-        string clipboardHtml = ClipboardImageBuilder.GetClipboardHtml(metaInfomation.Files![0]);
+        if (metaInfomation.Files is null || metaInfomation.Files.Length == 0)
+        {
+            throw new ArgumentException("Not Contain Image.");
+        }
+
+        if (package is not DataTransfer dataTransfer)
+        {
+            return;
+        }
+
+        string imagePath = metaInfomation.Files[0];
+        var item = new DataTransferItem();
+
+        // 先将条目交给数据包管理；后续填入的资源归数据包所有，填充失败时由数据包统一释放。
+        dataTransfer.Add(item);
+        await FillFileItem(item, imagePath);
+        FillItemImageFormats(item, imagePath);
+    }
+
+    private void FillItemImageFormats(DataTransferItem item, string imagePath)
+    {
+        try
+        {
+            // 此 Bitmap 的所有权归数据包，不再使用时由数据包释放。
+            var bitmap = new Bitmap(imagePath);
+            item.Set(DataFormat.Bitmap, bitmap);
+        }
+        catch (Exception ex)
+        {
+            _ = _logger.WriteAsync(LOG_TAG, $"Failed to load image: {imagePath}, {ex.Message}");
+        }
+
+        string clipboardHtml = ClipboardImageBuilder.GetClipboardHtml(imagePath);
 
         if (OperatingSystem.IsLinux())
         {
-            SetImage(dataObject, metaInfomation.Files![0], LinuxImageFormat);
-            dataObject.Set(Format.TextHtml, System.Text.Encoding.UTF8.GetBytes(clipboardHtml));
+            FillLinuxFileItem(item, [imagePath]);
+            SetPlatformImageFormats(item, imagePath, LinuxImageFormat);
+            item.Set(DataFormat.CreateBytesPlatformFormat(Format.TextHtml), System.Text.Encoding.UTF8.GetBytes(clipboardHtml));
         }
         else if (OperatingSystem.IsMacOS())
         {
-            SetImage(dataObject, metaInfomation.Files![0], MacImageFormat);
-            dataObject.Set(Format.PublicHtml, System.Text.Encoding.UTF8.GetBytes(clipboardHtml));
+            // SetPlatformImageFormats(item, imagePath, MacImageFormat); 完全靠avalonia统一的bitmap设置，稳定的话删除这条专用于macos的调用
+            item.Set(DataFormat.CreateBytesPlatformFormat(Format.PublicHtml), System.Text.Encoding.UTF8.GetBytes(clipboardHtml));
+        }
+        else if (OperatingSystem.IsWindows())
+        {
+            item.Set(DataFormat.CreateBytesPlatformFormat("HTML Format"), System.Text.Encoding.UTF8.GetBytes(clipboardHtml));
         }
 
-        string clipboardQq = ClipboardImageBuilder.GetClipboardQQFormat(metaInfomation.Files![0]);
-        dataObject.Set("QQ_Unicode_RichEdit_Format", System.Text.Encoding.UTF8.GetBytes(clipboardQq));
-
-        return dataObject;
+        string clipboardQq = ClipboardImageBuilder.GetClipboardQQFormat(imagePath);
+        item.Set(DataFormat.CreateBytesPlatformFormat("QQ_Unicode_RichEdit_Format"), System.Text.Encoding.UTF8.GetBytes(clipboardQq));
     }
 
     [SupportedOSPlatform("linux")]
@@ -48,7 +88,7 @@ internal class ImageClipboardSetter : FileClipboardSetter, IClipboardSetter<Core
         [Format.PublicTiff] = MagickFormat.Tiff,
     };
 
-    private static void SetImage(DataObject dataObject, string path, Dictionary<string, MagickFormat> mapper)
+    private static void SetPlatformImageFormats(DataTransferItem item, string path, Dictionary<string, MagickFormat> mapper)
     {
         using var magickImage = new MagickImage(path);
 
@@ -56,7 +96,7 @@ internal class ImageClipboardSetter : FileClipboardSetter, IClipboardSetter<Core
         {
             using var stream = new MemoryStream();
             magickImage.Write(stream, imageType.Value);
-            dataObject.Set(imageType.Key, stream.ToArray());
+            item.Set(DataFormat.CreateBytesPlatformFormat(imageType.Key), stream.ToArray());
         }
     }
 }

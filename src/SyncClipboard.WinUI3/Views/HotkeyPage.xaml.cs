@@ -23,23 +23,17 @@ namespace SyncClipboard.WinUI3.Views
             _viewModel = App.Current.Services.GetRequiredService<HotkeyViewModel>();
         }
 
-        private async void EditButtonClick(object sender, RoutedEventArgs e)
+        private async void EditButtonClick(object sender, RoutedEventArgs _)
         {
             _viewModel.EditingHotkey = Hotkey.Nothing;
-            _viewModel.EditingGuid = (Guid)((Button)sender).DataContext;
-            await _HotkeyInputDialog.ShowAsync();
-        }
-
-        private void ClearButtonClick(ContentDialog _, ContentDialogButtonClickEventArgs args)
-        {
-            _viewModel.EditingHotkey = Hotkey.Nothing;
-            _HotkeyInput.Focus(FocusState.Programmatic);
-            args.Cancel = true;
+            _viewModel.EditingCmdId = (string)((Button)sender).DataContext;
+            HotkeyEditor.XamlRoot = XamlRoot;
+            await HotkeyEditor.ShowAsync();
         }
 
         private void SetToDefaultButtonClick(object sender, RoutedEventArgs _)
         {
-            _viewModel.SetToDefaultCommand.Execute((Guid)((Button)sender).DataContext);
+            _viewModel.SetToDefaultCommand.Execute((string)((Button)sender).DataContext);
         }
     }
 }

@@ -1,4 +1,5 @@
-﻿using SyncClipboard.Core.Clipboard;
+using SyncClipboard.Core;
+using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Models;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,16 +9,18 @@ namespace SyncClipboard.WinUI3.ClipboardWinUI;
 
 internal abstract class ClipboardSetterBase<ProfileType> : IClipboardSetter<ProfileType> where ProfileType : Profile
 {
-    protected abstract Task<DataPackage> CreatePackage(ClipboardMetaInfomation metaInfomation);
+    public abstract Task FillPackage(object package, ClipboardMetaInfomation metaInfomation);
 
     private static async Task SetPackageToClipboard(DataPackage package, CancellationToken ctk)
     {
+        ctk.ThrowIfCancellationRequested();
+        using var nativeClipboardAccessGuard = await NativeClipboardAccess.AcquireAsync(ctk);
         Clipboard.SetContent(package);
         // Clipboard.SetContent() still occupies the system clipboard after calling
         for (int i = 0; i < 5; i++)
         {
-            await Task.Delay(50, ctk);
 #pragma warning disable CC0004 // Catch block cannot be empty
+            await Task.Delay(50, CancellationToken.None);
             try
             {
                 Clipboard.Flush();
@@ -30,6 +33,9 @@ internal abstract class ClipboardSetterBase<ProfileType> : IClipboardSetter<Prof
 
     public async Task SetLocalClipboard(ClipboardMetaInfomation metaInfomation, CancellationToken ctk)
     {
-        await ClipboardSetterBase<ProfileType>.SetPackageToClipboard(await CreatePackage(metaInfomation), ctk);
+        await AppCore.Current.Logger.WriteAsync("Clip Setter", "Clipboard setted, meta: " + metaInfomation);
+        var package = new DataPackage();
+        await FillPackage(package, metaInfomation);
+        await SetPackageToClipboard(package, ctk);
     }
 }

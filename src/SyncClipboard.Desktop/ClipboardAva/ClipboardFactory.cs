@@ -1,9 +1,13 @@
-﻿using Avalonia.Input.Platform;
+using Avalonia.Media.Imaging;
 using Microsoft.Extensions.DependencyInjection;
 using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
+using SyncClipboard.Core.Utilities;
+using SyncClipboard.Desktop.ClipboardAva.ClipboardReader;
 using System;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -11,54 +15,106 @@ namespace SyncClipboard.Desktop.ClipboardAva;
 
 internal partial class ClipboardFactory : ClipboardFactoryBase
 {
+    private const int MAX_RETRY_TIMES = 5;
     protected override ILogger Logger { get; set; }
     protected override IServiceProvider ServiceProvider { get; set; }
-    protected override IWebDav WebDav { get; set; }
 
-    private static IClipboard Clipboard => App.Current.Clipboard;
+    private readonly ClipboardReaderSelector Clipboard;
 
     private const string LOG_TAG = nameof(ClipboardFactory);
-    public static readonly SemaphoreSlim _semaphoreSlim = new(1, 1);
-
     public ClipboardFactory(IServiceProvider serviceProvider)
     {
         ServiceProvider = serviceProvider;
         Logger = ServiceProvider.GetRequiredService<ILogger>();
-        WebDav = ServiceProvider.GetRequiredService<IWebDav>();
+        Clipboard = ServiceProvider.GetRequiredService<ClipboardReaderSelector>();
     }
 
-    public override async Task<ClipboardMetaInfomation> GetMetaInfomation(CancellationToken ctk)
+    public override Task<ClipboardMetaInfomation> GetMetaInfomation(CancellationToken ctk)
     {
-        ClipboardMetaInfomation meta = new();
-        var clipboard = App.Current.MainWindow.Clipboard!;
+        return GetMetaInfomation(false, null, ctk);
+    }
 
-        for (int i = 0; i < 5; i++)
+    public Task<ClipboardMetaInfomation> GetMetaInfomation(int? fingerprint, CancellationToken ctk)
+    {
+        return GetMetaInfomation(true, fingerprint, ctk);
+    }
+
+    private async Task<ClipboardMetaInfomation> GetMetaInfomation(bool hasFingerprint, int? fingerprint, CancellationToken ctk)
+    {
+        bool hasClipboard = false;
+
+        for (int i = 0; i < MAX_RETRY_TIMES; i++)
         {
-            await _semaphoreSlim.WaitAsync(ctk);
+            await NativeClipboardAccess.Semaphore.WaitAsync(ctk);
             try
             {
-                if (OperatingSystem.IsLinux())
+                if (OperatingSystem.IsWindows())
                 {
-                    return await HandleLinuxClipboard(ctk);
+                    var meta = await HandleWindowsClipboard(ctk);
+                    return meta;
                 }
-                else if (OperatingSystem.IsMacOS())
+
+                var formats = await Clipboard.GetFormatsAsync(ctk);
+                if (formats is null)
                 {
-                    return await HandleMacosClipboard(ctk);
+                    await Logger.WriteAsync(LOG_TAG, $"GetFormatsAsync() is null");
                 }
                 else
                 {
-                    meta.Text = await clipboard?.GetTextAsync().WaitAsync(ctk)!;
+                    hasClipboard = true;
+                    if (OperatingSystem.IsLinux())
+                    {
+                        var meta = await HandleLinuxClipboard(formats, hasFingerprint, fingerprint, ctk);
+                        return meta;
+                    }
+                    else if (OperatingSystem.IsMacOS())
+                    {
+                        var meta = await HandleMacosClipboard(formats, ctk);
+                        return meta;
+                    }
                 }
-                break;
             }
             catch (Exception ex) when (ctk.IsCancellationRequested is false)
             {
-                Logger.Write(ex.Message);
+                await Logger.WriteAsync(ex.Message);
             }
-            finally { _semaphoreSlim.Release(); }
+            finally
+            {
+                NativeClipboardAccess.Semaphore.Release();
+            }
             await Task.Delay(200, ctk);
         }
 
-        return meta;
+        if (hasClipboard is false)
+        {
+            await Logger.WriteAsync(LOG_TAG, $"Clipboard is empty");
+            return new ClipboardMetaInfomation();
+        }
+        throw new Exception("Can't get clipboard data");
+    }
+
+    private async Task HandleFiles(ClipboardMetaInfomation meta, CancellationToken token)
+    {
+        var files = await Clipboard.GetFilesAsync(token);
+        if (files is not null)
+        {
+            meta.Files = files?.Select(item => item.Path.LocalPath).ToArray();
+        }
+    }
+
+    private async Task HandleBitmap(ClipboardMetaInfomation meta, CancellationToken token)
+    {
+        if (meta.Image is not null)
+        {
+            return;
+        }
+
+        using var bitmap = await Clipboard.GetBitmapAsync(token);
+        if (bitmap is not null)
+        {
+            using var stream = new MemoryStream();
+            bitmap.Save(stream, PngBitmapEncoderOptions.Default);
+            meta.Image = ClipboardImage.TryCreateImage(stream.ToArray());
+        }
     }
 }

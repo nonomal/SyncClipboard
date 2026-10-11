@@ -1,9 +1,9 @@
 ﻿using AppKit;
 using Avalonia;
 using SyncClipboard.Core.Commons;
-using SyncClipboard.Core.Models.UserConfigs;
 using SyncClipboard.Core.Utilities;
 using System;
+using System.IO;
 
 namespace SyncClipboard.Desktop.MacOS;
 
@@ -15,8 +15,7 @@ class Program
     [STAThread]
     public static void Main(string[] args)
     {
-        using var mutex = AppInstance.EnsureSingleInstance();
-        if (mutex is null)
+        if (AppInstance.EnsureSingleInstance(args) is false)
         {
             return;
         }
@@ -28,19 +27,20 @@ class Program
         }
         catch (Exception e)
         {
-            App.Current?.Logger?.Write($"UnhandledException {e.GetType()} {e.Message}");
-            App.Current?.AppCore?.Stop();
+            var path = Path.Combine(Env.LogFolder, $"{DateTime.Now:yyyy-MM-dd HH-mm-ss}.dmp");
+            File.WriteAllText(path + ".txt", $"UnhandledException {e.GetType()} {e.Message} \n{e.StackTrace}");
+            App.Current?.Logger?.Write($"UnhandledException {e.GetType()} {e.Message} \n {e.StackTrace}");
+            App.Current?.AppCore?.ExitAsync().GetAwaiter().GetResult();
         }
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.
     public static AppBuilder BuildAvaloniaApp()
     {
-        var hide = new ConfigManager().GetConfig<ProgramConfig>().HideWindowOnStartup;
         return AppBuilder.Configure(() => new App(AppServices.ConfigureServices()))
             .UsePlatformDetect()
             .WithInterFont()
             .LogToTrace()
-            .With(new MacOSPlatformOptions { ShowInDock = !hide });
+            .With(new MacOSPlatformOptions { ShowInDock = false });
     }
 }

@@ -2,6 +2,7 @@
 
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Xaml;
+using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Utilities;
 using System;
 using System.Runtime.InteropServices;
@@ -10,18 +11,22 @@ using WinRT;
 
 namespace SyncClipboard.WinUI3;
 
-public static class Program
+public static partial class Program
 {
-    [DllImport("Microsoft.ui.xaml.dll")]
-    private static extern void XamlCheckProcessRequirements();
+    [LibraryImport("Microsoft.ui.xaml.dll")]
+    private static partial void XamlCheckProcessRequirements();
 
     [STAThread]
-    private static void Main(string[] _)
+    private static int Main(string[] args)
     {
-        using var mutex = AppInstance.EnsureSingleInstance();
-        if (mutex is null)
+        if (StartUpHelper.TryUpdateWindowsStartupTaskFromArguments(args, out var returnCode))
         {
-            return;
+            return returnCode;
+        }
+
+        if (AppInstance.EnsureSingleInstance(args) is false)
+        {
+            return (int)ReturnCode.Success;
         }
 
         try
@@ -38,7 +43,10 @@ public static class Program
         catch (Exception e)
         {
             App.Current?.LogUnhandledException(e);
+            return (int)ReturnCode.UnhandledException;
         }
+
+        return (int)ReturnCode.Success;
     }
 }
 

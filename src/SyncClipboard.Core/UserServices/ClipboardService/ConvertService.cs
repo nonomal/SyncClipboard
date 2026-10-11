@@ -1,11 +1,11 @@
 using Microsoft.Extensions.DependencyInjection;
-using SyncClipboard.Abstract;
-using SyncClipboard.Abstract.Notification;
+using NativeNotification.Interface;
 using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
 using SyncClipboard.Core.Models.UserConfigs;
+using SyncClipboard.Core.UserServices.ClipboardService;
 using SyncClipboard.Core.Utilities.Image;
 
 namespace SyncClipboard.Core.UserServices;
@@ -17,10 +17,6 @@ public class ConvertService : ClipboardHander
     public override string SERVICE_NAME => I18n.Strings.ImageCompatibility;
     public override string LOG_TAG => "COMPATIBILITY";
 
-    protected override IContextMenu? ContextMenu => _serviceProvider.GetRequiredService<IContextMenu>();
-    protected override IClipboardChangingListener ClipboardChangingListener
-                                                  => _serviceProvider.GetRequiredService<IClipboardChangingListener>();
-    protected override ILogger Logger => _logger;
     protected override bool SwitchOn
     {
         get => _clipboardConfig.ConvertSwitchOn;
@@ -31,9 +27,8 @@ public class ConvertService : ClipboardHander
         }
     }
 
-    protected override async Task HandleClipboard(ClipboardMetaInfomation metaInfo, CancellationToken cancellationToken)
+    protected override async Task HandleClipboard(ClipboardMetaInfomation metaInfo, Profile clipboardProfile, CancellationToken cancellationToken)
     {
-        var clipboardProfile = await _clipboardFactory.CreateProfileFromMeta(metaInfo, cancellationToken);
         if (clipboardProfile.Type != ProfileType.File || !NeedAdjust(metaInfo))
         {
             return;
@@ -43,8 +38,8 @@ public class ConvertService : ClipboardHander
         {
             var file = metaInfo.Files![0];
             var newPath = await CompatibilityCast(_serviceProvider, file, cancellationToken);
-            var profile = await ImageProfile.Create(newPath, cancellationToken);
-            await profile.SetLocalClipboard(false, cancellationToken);
+            var profile = new ImageProfile(newPath);
+            await _localClipboardSetter.Set(profile, cancellationToken);
         }
         catch (Exception ex)
         {
@@ -57,29 +52,24 @@ public class ConvertService : ClipboardHander
 
     private readonly ILogger _logger;
     private readonly ConfigManager _configManager;
-    private readonly IClipboardFactory _clipboardFactory;
     private readonly IServiceProvider _serviceProvider;
+    private readonly LocalClipboardSetter _localClipboardSetter;
 
     private ClipboardAssistConfig _clipboardConfig;
 
-    public ConvertService(IServiceProvider serviceProvider)
+    public ConvertService(IServiceProvider serviceProvider, LocalClipboardSetter localClipboardSetter)
     {
         _serviceProvider = serviceProvider;
         _logger = _serviceProvider.GetRequiredService<ILogger>();
         _configManager = _serviceProvider.GetRequiredService<ConfigManager>();
-        _clipboardFactory = _serviceProvider.GetRequiredService<IClipboardFactory>();
+        _localClipboardSetter = localClipboardSetter;
 
         _clipboardConfig = _configManager.GetConfig<ClipboardAssistConfig>();
         _configManager.ListenConfig<ClipboardAssistConfig>(config => _clipboardConfig = config);
     }
 
-    private bool NeedAdjust(ClipboardMetaInfomation metaInfo)
+    private static bool NeedAdjust(ClipboardMetaInfomation metaInfo)
     {
-        if (_clipboardConfig.EasyCopyImageSwitchOn == false)
-        {
-            return false;
-        }
-
         if (metaInfo.Files is null)
         {
             return false;
@@ -106,14 +96,15 @@ public class ConvertService : ClipboardHander
     internal static async Task<string> CompatibilityCast(IServiceProvider services, string localPath, CancellationToken ctk)
     {
         var filename = Path.GetFileName(localPath);
-        var notification = services.GetRequiredService<INotification>();
-        var progressBar = notification.CreateProgressNotification(filename[..Math.Min(filename.Length, 50)]);
+        var notification = services.GetRequiredService<INotificationManager>();
+        var progressBar = notification.CreateProgress(true);
+        progressBar.Title = filename[..Math.Min(filename.Length, 50)];
         try
         {
             progressBar.IsIndeterminate = true;
             progressBar.ProgressValueTip = "Converting";
             progressBar.Image = new Uri(localPath);
-            progressBar.ShowSilent();
+            progressBar.Show(new NotificationDeliverOption { Silent = true });
             return await ImageHelper.CompatibilityCast(localPath, Env.TemplateFileFolder, ctk);
         }
         finally

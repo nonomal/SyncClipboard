@@ -1,22 +1,34 @@
-﻿using SyncClipboard.Abstract;
+using Microsoft.Extensions.DependencyInjection;
 using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
+using SyncClipboard.Core.Models.UserConfigs;
+using SyncClipboard.Core.Utilities.FileCacheManager;
 using SyncClipboard.Core.Utilities.Image;
-using System.Net;
-using System.Text.Json;
 
 namespace SyncClipboard.Core.Clipboard;
 
-public abstract class ClipboardFactoryBase : IClipboardFactory, IProfileDtoHelper
+public abstract class ClipboardFactoryBase : IClipboardFactory
 {
     protected abstract ILogger Logger { get; set; }
     protected abstract IServiceProvider ServiceProvider { get; set; }
-    protected abstract IWebDav WebDav { get; set; }
+    protected ConfigManager Config => ServiceProvider.GetRequiredService<ConfigManager>();
+    private IProfileEnv ProfileEnv => ServiceProvider.GetRequiredService<IProfileEnv>();
+    private LocalFileCacheManager FileCacheManager => ServiceProvider.GetRequiredService<LocalFileCacheManager>();
+    private IClipboardOwnerProvider? ClipboardOwnerProvider => ServiceProvider.GetService<IClipboardOwnerProvider>();
+
+    public void SetClipboardOwner(ClipboardMetaInfomation meta)
+    {
+        meta.Owner = ClipboardOwnerProvider?.GetClipboardOwner();
+    }
 
     public abstract Task<ClipboardMetaInfomation> GetMetaInfomation(CancellationToken ctk);
+    public Task<Profile> CreateProfileFromMeta(ClipboardMetaInfomation metaInfomation, CancellationToken ctk)
+    {
+        return CreateProfileFromMeta(metaInfomation, true, ctk);
+    }
 
-    public async Task<Profile> CreateProfileFromMeta(ClipboardMetaInfomation metaInfomation, CancellationToken ctk)
+    public async Task<Profile> CreateProfileFromMeta(ClipboardMetaInfomation metaInfomation, bool contentControl, CancellationToken ctk)
     {
         if (metaInfomation.Files != null && metaInfomation.Files.Length >= 1)
         {
@@ -25,14 +37,24 @@ public abstract class ClipboardFactoryBase : IClipboardFactory, IProfileDtoHelpe
             {
                 if (ImageHelper.FileIsImage(filename))
                 {
-                    return await ImageProfile.Create(filename, ctk);
+                    return new ImageProfile(filename);
                 }
-                return await FileProfile.Create(filename, ctk);
+                return new FileProfile(filename, null, null);
             }
             else
             {
-                return await GroupProfile.Create(metaInfomation.Files, ctk);
+                return new GroupProfile(metaInfomation.Files, contentControl ? Config.GetConfig<FileFilterConfig>() : null);
             }
+        }
+
+        if (metaInfomation.Text != null && metaInfomation.Image != null)
+        {
+            var textImageRule = Config.GetConfig<ClipboardAcquisitionConfig>().TextImageRule;
+            if (textImageRule == TextImageRule.Image)
+            {
+                return await CreateImageProfileWithCache(metaInfomation.Image, ctk);
+            }
+            return new TextProfile(metaInfomation.Text);
         }
 
         if (metaInfomation.Text != null)
@@ -42,129 +64,43 @@ public abstract class ClipboardFactoryBase : IClipboardFactory, IProfileDtoHelpe
 
         if (metaInfomation.Image != null)
         {
-            return await ImageProfile.Create(metaInfomation.Image, ctk);
+            return await CreateImageProfileWithCache(metaInfomation.Image, ctk);
         }
 
         return new UnknownProfile();
     }
 
-    private async Task<Profile> UploadAndReturnBlankProfile(CancellationToken ctk)
+    private async Task<ImageProfile> CreateImageProfileWithCache(IClipboardImage image, CancellationToken ctk)
     {
-        var blankProfile = new TextProfile("");
-        await blankProfile.UploadProfile(WebDav, ctk);
-        return blankProfile;
+        var hash = image.GetHashCode().ToString();
+        var cachedPath = await FileCacheManager.GetCachedFilePathAsync(nameof(IClipboardImage), hash, ctk);
+        if (cachedPath is not null)
+        {
+            return new ImageProfile(cachedPath);
+        }
+
+        var tempPath = Path.Combine(Env.TemplateFileFolder, ImageProfile.CreateImageFileName());
+        await image.Save(tempPath, ctk);
+
+        var imageProfile = new ImageProfile(tempPath);
+
+        var profileHash = await imageProfile.GetHash(ctk);
+        var workingDir = imageProfile.CreateWorkingDir(ProfileEnv.GetPersistentDir(), profileHash);
+        var dataPath = Path.Combine(workingDir, Path.GetFileName(tempPath));
+
+        if (tempPath != dataPath)
+        {
+            await Task.Run(() => File.Move(tempPath, dataPath, true), ctk).WaitAsync(ctk);
+            await imageProfile.SetTransferData(dataPath, false, ctk);
+        }
+
+        await FileCacheManager.SaveCacheEntryAsync(nameof(IClipboardImage), hash, dataPath, ctk);
+        return imageProfile;
     }
 
     public async Task<Profile> CreateProfileFromLocal(CancellationToken ctk)
     {
         var meta = await GetMetaInfomation(ctk);
         return await CreateProfileFromMeta(meta, ctk);
-    }
-
-    public async Task<Profile> CreateProfileFromRemote(CancellationToken cancelToken)
-    {
-        try
-        {
-            var profileDTO = await WebDav.GetJson<ClipboardProfileDTO>(Env.RemoteProfilePath, cancelToken);
-            Logger.Write(nameof(ClipboardFactoryBase), profileDTO?.ToString() ?? "null");
-            ArgumentNullException.ThrowIfNull(profileDTO);
-
-            return GetProfileBy(profileDTO);
-        }
-        catch (Exception ex) when (
-            ex is JsonException ||
-            ex is HttpRequestException { StatusCode: HttpStatusCode.NotFound } ||
-            ex is ArgumentException)
-        {
-            return await UploadAndReturnBlankProfile(cancelToken);
-        }
-        catch
-        {
-            Logger.Write("CreateFromRemote failed");
-            throw;
-        }
-    }
-
-    private static Profile GetProfileBy(ClipboardProfileDTO profileDTO)
-    {
-        switch (profileDTO.Type)
-        {
-            case ProfileType.Text:
-                return new TextProfile(profileDTO.Clipboard);
-            case ProfileType.File:
-                {
-                    if (ImageHelper.FileIsImage(profileDTO.File))
-                    {
-                        return new ImageProfile(profileDTO);
-                    }
-                    return new FileProfile(profileDTO);
-                }
-            case ProfileType.Image:
-                return new ImageProfile(profileDTO);
-            case ProfileType.Group:
-                return new GroupProfile(profileDTO);
-        }
-
-        return new UnknownProfile();
-    }
-
-    public async Task<ClipboardProfileDTO> CreateProfileDto(ClipboardProfileDTO? existed, string destFolder)
-    {
-        var token = CancellationToken.None;
-        var profile = await CreateProfileFromLocal(token);
-        if (existed is not null)
-        {
-            var existedProfile = GetProfileBy(existed);
-            if (Profile.Same(existedProfile, profile))
-            {
-                return existed;
-            }
-        }
-
-        if (profile is FileProfile fileProfile)
-        {
-            if (fileProfile is GroupProfile groupProfile)
-            {
-                await groupProfile.PrepareTransferFile(token);
-            }
-            var fullPath = fileProfile.FullPath!;
-            if (Path.GetDirectoryName(fullPath) != destFolder)
-            {
-                if (!Directory.Exists(destFolder))
-                {
-                    Directory.CreateDirectory(destFolder);
-                }
-                await Task.Run(() => File.Copy(fullPath, Path.Combine(destFolder, Path.GetFileName(fullPath)), true));
-            }
-        }
-        return profile.ToDto();
-    }
-
-    public async Task SetLocalClipboardWithDto(ClipboardProfileDTO profileDto, string fileFolder)
-    {
-        ArgumentNullException.ThrowIfNull(profileDto);
-        try
-        {
-            var ctk = new CancellationTokenSource(TimeSpan.FromSeconds(60)).Token;
-            var profile = GetProfileBy(profileDto);
-            if (profile is FileProfile fileProfile)
-            {
-                fileProfile.FullPath = Path.Combine(fileFolder, fileProfile.FileName);
-                if (profile is GroupProfile groupProfile)
-                {
-                    await groupProfile.ExtractFiles(ctk);
-                }
-            }
-
-            if (!Profile.Same(profile, await CreateProfileFromLocal(ctk)))
-            {
-                await profile.SetLocalClipboard(true, ctk);
-                Logger.Write("Set clipboard with: " + profileDto.ToString().Replace(Environment.NewLine, @"\n"));
-            }
-        }
-        catch (TaskCanceledException)
-        {
-            Logger.Write("Set local clipboard timeout.");
-        }
     }
 }

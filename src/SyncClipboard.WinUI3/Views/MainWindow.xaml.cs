@@ -1,13 +1,21 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
+using NativeNotification.Interface;
+using SyncClipboard.Core.Commons;
+using SyncClipboard.Core.I18n;
 using SyncClipboard.Core.Interfaces;
+using SyncClipboard.Core.Models.UserConfigs;
+using SyncClipboard.Core.Utilities;
 using SyncClipboard.Core.ViewModels;
 using SyncClipboard.WinUI3.Win32;
 using System;
-using Windows.UI;
+using System.Drawing.Text;
+using System.Linq;
+using Windows.Graphics;
 using WinUIEx;
 using Application = Microsoft.UI.Xaml.Application;
 
@@ -19,15 +27,17 @@ namespace SyncClipboard.WinUI3.Views
     /// <summary>
     /// An empty window that can be used on its own or navigated to within a Frame.
     /// </summary>
-    public sealed partial class MainWindow : Window, IMainWindow
+    public sealed partial class MainWindow : Window, IMainWindow, IDisposable
     {
         public TrayIcon TrayIcon => _TrayIcon;
         private readonly MainViewModel _viewModel;
+        private bool _mainWindowLoaded = false;
+        private bool _disposed;
 
         public MainWindow()
         {
-            this.InitializeComponent();
             _viewModel = App.Current.Services.GetRequiredService<MainViewModel>();
+            this.InitializeComponent();
 
             ExtendsContentIntoTitleBar = true;
             SetTitleBar(_AppTitleBar.DraggableArea);
@@ -35,13 +45,38 @@ namespace SyncClipboard.WinUI3.Views
 
             // AppWindow.SetIcon() has issue https://github.com/microsoft/microsoft-ui-xaml/issues/8134, so use P/Invoke
             this.SetWindowIcon("Assets/icon.ico");
-            this.SetWindowSize(850, 530);
             Closed += SettingWindow_Closed;
 
-            ChangeTitleBarButtonForegroundColor((FrameworkElement)Content, null);
-            ((FrameworkElement)Content).ActualThemeChanged += ChangeTitleBarButtonForegroundColor;
+            this.AppWindow.Resize(new SizeInt32(_viewModel.Width, _viewModel.Height));
+            this.SetTitleBarButtonForegroundColor();
 
             _MenuList.SelectedIndex = 0;
+
+            App.Current.Services.GetRequiredService<ConfigManager>().GetAndListenConfig<ProgramConfig>(config =>
+                this.SetTheme(config.Theme)
+            );
+        }
+
+        private void OnWindowLoaded()
+        {
+            if (!IsIconFontInstalled())
+            {
+                var manager = App.Current.Services.GetRequiredService<INotificationManager>();
+                var notification = manager.Create();
+                notification.Title = Strings.IconMissingDetected;
+                notification.Message = Strings.DownloadAndInstallIconFont;
+                notification.Buttons = [
+                    new ActionButton(Strings.Details, () => Sys.OpenWithDefaultApp("https://learn.microsoft.com/zh-cn/windows/apps/design/style/segoe-fluent-icons-font")),
+                    new ActionButton(Strings.Download, () => Sys.OpenWithDefaultApp("https://aka.ms/SegoeFluentIcons"))
+                ];
+                notification.Show();
+            }
+        }
+
+        private static bool IsIconFontInstalled()
+        {
+            using InstalledFontCollection ifc = new();
+            return ifc.Families.Any(f => f.Name == "Segoe Fluent Icons");
         }
 
         internal void NavigateTo(PageDefinition page,
@@ -51,6 +86,7 @@ namespace SyncClipboard.WinUI3.Views
             string pageName = "SyncClipboard.WinUI3.Views." + page.Name + "Page";
             Type? pageType = Type.GetType(pageName);
             SettingContentFrame.Navigate(pageType, parameter, new SlideNavigationTransitionInfo { Effect = effect });
+            _ScrollViewer.ScrollToVerticalOffset(0);
 
             // Memory Leak https://github.com/microsoft/microsoft-ui-xaml/issues/5978
             GC.Collect();
@@ -67,6 +103,20 @@ namespace SyncClipboard.WinUI3.Views
                 _ => throw new NotImplementedException()
             };
             NavigateTo(page, platformEffect, parameter);
+        }
+
+        public void OpenPage(PageDefinition page, object? para)
+        {
+            void action()
+            {
+                this.Show();
+                var index = _viewModel.MainWindowPage.IndexOf(page);
+                if (index != -1)
+                {
+                    _MenuList.SelectedIndex = _viewModel.MainWindowPage.IndexOf(page);
+                }
+            }
+            RunOnMainThread(action);
         }
 
         public void NavigateToLastLevel()
@@ -91,10 +141,28 @@ namespace SyncClipboard.WinUI3.Views
             _ScrollViewer.VerticalScrollBarVisibility = ScrollBarVisibility.Auto;
         }
 
-        private void SettingWindow_Closed(object sender, WindowEventArgs args)
+        private void SettingWindow_Closed(object _, WindowEventArgs args)
         {
             this.AppWindow.Hide();
             args.Handled = true;
+        }
+
+        private void Destroy()
+        {
+            Closed -= SettingWindow_Closed;
+            Close();
+        }
+
+        public void Dispose()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            Destroy();
+            GC.SuppressFinalize(this);
         }
 
         private void ListView_SelectionChanged(object sender, SelectionChangedEventArgs _)
@@ -136,19 +204,25 @@ namespace SyncClipboard.WinUI3.Views
             _viewModel.BreadcrumbBarClicked(args.Index);
         }
 
-        private void Window_SizeChanged(object sender, WindowSizeChangedEventArgs args)
+        private void Window_SizeChanged(object _, WindowSizeChangedEventArgs args)
         {
+            if (_mainWindowLoaded)
+            {
+                _viewModel.Height = this.AppWindow.Size.Height;
+                _viewModel.Width = this.AppWindow.Size.Width;
+            }
+
             if (args.Size.Width < 800)
             {
                 SplitPane.IsPaneOpen = false;
                 SplitPane.DisplayMode = SplitViewDisplayMode.Overlay;
-                _AppTitleBar.HideNavigationButton();
+                _AppTitleBar.ShowNavigationButton();
             }
             else
             {
                 SplitPane.DisplayMode = SplitViewDisplayMode.Inline;
                 SplitPane.IsPaneOpen = true;
-                _AppTitleBar.ShowNavigationButton();
+                _AppTitleBar.HideNavigationButton();
                 SplitPane.PaneBackground = (Brush)Application.Current.Resources["LayerOnMicaBaseAltFillColorTransparentBrush"];
             }
         }
@@ -166,16 +240,21 @@ namespace SyncClipboard.WinUI3.Views
             }
         }
 
-        public void Show()
+        private void RunOnMainThread(Action action)
         {
             if (this.DispatcherQueue.HasThreadAccess)
             {
-                ShowWindow();
+                action.Invoke();
             }
             else
             {
-                this.DispatcherQueue.TryEnqueue(ShowWindow);
+                this.DispatcherQueue.TryEnqueue(action.Invoke);
             }
+        }
+
+        public void Show()
+        {
+            RunOnMainThread(ShowWindow);
         }
 
         void ShowWindow()
@@ -186,32 +265,17 @@ namespace SyncClipboard.WinUI3.Views
                 this.Activate();
             }
             this.SetForegroundWindow();
-        }
 
-        public void SetFont(string font)
-        {
-        }
-
-        public void ExitApp()
-        {
-            App.Current.ExitApp();
-        }
-
-        public void ChangeTheme(string theme)
-        {
-            ((FrameworkElement)Content).RequestedTheme = theme switch
+            if (!_mainWindowLoaded)
             {
-                "Light" => ElementTheme.Light,
-                "Dark" => ElementTheme.Dark,
-                _ => ElementTheme.Default,
-            };
+                _mainWindowLoaded = true;
+                OnWindowLoaded();
+            }
         }
 
-        private void ChangeTitleBarButtonForegroundColor(FrameworkElement sender, object? _)
+        private void EscPressed(KeyboardAccelerator _0, KeyboardAcceleratorInvokedEventArgs _1)
         {
-            var actualTheme = sender.ActualTheme.ToString();
-            var themeResource = (ResourceDictionary)Application.Current.Resources.ThemeDictionaries[actualTheme];
-            AppWindow.TitleBar.ButtonForegroundColor = (Color)themeResource["TitleBarButtonForegroundColor"];
+            this.Close();
         }
     }
 }

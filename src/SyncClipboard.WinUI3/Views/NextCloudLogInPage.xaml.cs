@@ -2,9 +2,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Navigation;
-using SyncClipboard.Abstract.Notification;
-using SyncClipboard.Core.Interfaces;
+using NativeNotification.Interface;
 using SyncClipboard.Core.ViewModels;
+using SyncClipboard.Core.Utilities;
 using System;
 
 // To learn more about WinUI, the WinUI project structure,
@@ -31,12 +31,18 @@ public sealed partial class NextCloudLogInPage : Page
         });
     }
 
+    protected override void OnNavigatedTo(NavigationEventArgs e)
+    {
+        App.Current.MainWindow.DispableScrollViewer();
+        base.OnNavigatedTo(e);
+    }
+
     private Visibility BoolToVisibility(bool value)
     {
         return value ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    private double BoolToHide(Microsoft.UI.Xaml.Controls.ProgressBar progressBar, bool value)
+    private double BoolToHide(ProgressBar progressBar, bool value)
     {
         this.DispatcherQueue.TryEnqueue(() => progressBar.IsEnabled = value);
         return value ? 1 : 0;
@@ -44,14 +50,9 @@ public sealed partial class NextCloudLogInPage : Page
 
     protected override void OnNavigatedFrom(NavigationEventArgs e)
     {
-        ((MainWindow)App.Current.Services.GetRequiredService<IMainWindow>()).EnableScrollViewer();
+        App.Current.MainWindow.EnableScrollViewer();
         _viewModel.Cancel();
         base.OnNavigatedFrom(e);
-    }
-
-    protected override void OnNavigatedTo(NavigationEventArgs _)
-    {
-        ((MainWindow)App.Current.Services.GetRequiredService<IMainWindow>()).DispableScrollViewer();
     }
 
     private async void TreeView_ExpandingAsync(TreeView _, TreeViewExpandingEventArgs args)
@@ -69,7 +70,8 @@ public sealed partial class NextCloudLogInPage : Page
         }
         catch (Exception ex)
         {
-            App.Current.Services.GetRequiredService<INotification>().SendText(Core.I18n.Strings.FailedToSet, ex.Message);
+            var notification = App.Current.Services.GetRequiredService<INotificationManager>();
+            notification.ShowText(Core.I18n.Strings.FailedToSet, ex.Message);
         }
     }
 }

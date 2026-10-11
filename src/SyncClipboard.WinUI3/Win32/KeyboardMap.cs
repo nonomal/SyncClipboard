@@ -26,14 +26,11 @@ internal static class KeyboardMap
         [VK.VK_PAUSE] = Key.Pause,
         [VK.VK_CANCEL] = Key.Cancel,
         [VK.VK_CAPITAL] = Key.Capital,
-        //[VK.VK_KANA] = Key.KANA,
-        //[VK.VK_HANGUEL] = Key.HANGUEL,
-        [VK.VK_HANGUL] = Key.Hangul,
+        [VK.VK_KANA] = Key.Kana,
         [VK.VK_IME_ON] = Key.ImeOn,
         [VK.VK_JUNJA] = Key.Junja,
         [VK.VK_FINAL] = Key.Final,
-        //[VK.VK_HANJA] = Key.HANJA,
-        [VK.VK_KANJI] = Key.Kanji,
+        [VK.VK_HANJA] = Key.Hanja,
         [VK.VK_IME_OFF] = Key.ImeOff,
         [VK.VK_ESCAPE] = Key.Esc,
         [VK.VK_CONVERT] = Key.Convert,
@@ -243,5 +240,31 @@ internal static class KeyboardMap
         }
 
         return newDict;
+    }
+
+    /// <summary>
+    /// 将WinUI3 VirtualKey转换为Core键值
+    /// </summary>
+    /// <param name="virtualKey">WinUI3 VirtualKey</param>
+    /// <returns>Core键值，如果找不到映射则返回null</returns>
+    public static Key? ConvertFromVirtualKey(Windows.System.VirtualKey virtualKey)
+    {
+        // 将WinUI3 VirtualKey转换为VK枚举
+        var vk = (VK)(int)virtualKey;
+        return VirtualKeyMap.TryGetValue(vk, out var coreKey) ? coreKey : null;
+    }
+
+    /// <summary>
+    /// 将Core键值转换为WinUI3 VirtualKey
+    /// </summary>
+    /// <param name="coreKey">Core键值</param>
+    /// <returns>WinUI3 VirtualKey，如果找不到映射则返回null</returns>
+    public static Windows.System.VirtualKey? ConvertToVirtualKey(Key coreKey)
+    {
+        if (VirtualKeyMapReverse.TryGetValue(coreKey, out var vk))
+        {
+            return (Windows.System.VirtualKey)(int)vk;
+        }
+        return null;
     }
 }

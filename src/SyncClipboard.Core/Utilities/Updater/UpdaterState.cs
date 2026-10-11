@@ -1,0 +1,19 @@
+namespace SyncClipboard.Core.Utilities.Updater;
+
+public enum UpdaterState
+{
+    Idle,
+    CheckingForUpdate,
+    UpdateAvailable,
+    UpdateAvailableAt3rdPartySrc,
+    UpdateAvailableAtGitHubExtra,
+    UpdateAvailableAtMarket,
+    ReadyForDownload,
+    UpToDate,
+    Downloading,
+    Downloaded,
+    Failed,
+    Canceled,
+    ReadyToInstall,
+    Installing,
+}

@@ -25,7 +25,7 @@ jobs:
     strategy:
       matrix:
         cpu: [x64, arm64]
-        type: [self-contained, no-self-contained]
+        type: [self-contained]
         package-type: [AppImage, rpm, deb]
         include:
           - package-type: AppImage
@@ -48,43 +48,43 @@ jobs:
             cpu: arm64
             package-head: syncclipboard_
             package-tail: _arm64
-        exclude: # rpmbuild arm64 failed
+          # - package-type: rpm
+          #   cpu: arm64
+          #   package-head: syncclipboard_
+          #   package-tail: .arm64
+          - type: self-contained
+            package-dotnet-runtime: ''
+          # - type: no-self-contained
+          #   package-dotnet-runtime: '_no-dotnet-runtime'
+        exclude: # rpmbuild arm64 failed https://github.com/kuiperzone/PupNet-Deploy/issues/3
           - package-type: rpm
             cpu: arm64
-            # package-head: syncclipboard_
-            # package-tail: .arm64
 
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: package
     steps:
-      - name: Download version
-        uses: actions/download-artifact@v4
+      - name: Download last-job-built change log
+        uses: actions/download-artifact@v8
         with:
-          name: version-desktop
+          name: feature
 
-      - name: Download feature
-        uses: actions/download-artifact@v4
+      - name: Download package SyncClipboard_linux_${{ matrix.cpu }}${{ matrix.package-dotnet-runtime }}.${{ matrix.package-type }}
+        uses: actions/download-artifact@v8
         with:
-          name: feature-desktop
+          name: SyncClipboard_linux_${{ matrix.cpu }}${{ matrix.package-dotnet-runtime }}.${{ matrix.package-type }}
 
-      - name: Read version
-        id: version
-        uses: juliangruber/read-file-action@v1
+      - name: Download AppImage update artifact
+        if: matrix.package-type == 'AppImage' && matrix.type == 'self-contained'
+        uses: actions/download-artifact@v8
         with:
-          path: version.txt
-
-      - name: Download build artifacts ${{ matrix.type }} ${{ matrix.package-type }}
-        uses: actions/download-artifact@v4
-        with:
-          name: ${{ matrix.package-head }}${{ steps.version.outputs.content }}_linux_${{ matrix.type }}${{ matrix.package-tail }}.${{ matrix.package-type }}
-
-      - name: Change name
-        run: mv "${{ matrix.package-head }}${{ steps.version.outputs.content }}-1${{ matrix.package-tail }}.${{ matrix.package-type }}" "${{ matrix.package-head }}${{ steps.version.outputs.content }}_linux_${{ matrix.type }}${{ matrix.package-tail }}.${{ matrix.package-type }}"
+          name: SyncClipboard_linux_${{ matrix.cpu }}.AppImage.zsync
 
       - name: Release
         uses: ncipollo/release-action@v1
         with:
           allowUpdates: true
-          prerelease: ${{ contains(github.ref_name, 'preview') }}
-          artifacts: ${{ matrix.package-head }}${{ steps.version.outputs.content }}_linux_${{ matrix.type }}${{ matrix.package-tail }}.${{ matrix.package-type }}
+          draft: true
+          prerelease: ${{ contains(github.ref_name, 'beta') }}
+          artifacts: SyncClipboard_linux_${{ matrix.cpu }}${{ matrix.package-dotnet-runtime }}.${{ matrix.package-type }}*
+          artifactErrorsFailBuild: true
           bodyFile: feature.txt

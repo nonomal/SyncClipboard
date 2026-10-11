@@ -1,6 +1,5 @@
 ﻿using Avalonia.Controls;
-using Avalonia.Media;
-using Avalonia.Styling;
+using Avalonia.Input;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.Input;
 using FluentAvalonia.UI.Media.Animation;
@@ -22,17 +21,26 @@ public partial class MainWindow : Window, IMainWindow
             this.ExtendClientAreaToDecorationsHint = true;
         }
         InitializeComponent();
+        Height = _viewModel.Height;
+        Width = _viewModel.Width;
     }
 
     protected override void OnClosing(WindowClosingEventArgs e)
     {
+        _viewModel.Height = (int)Height;
+        _viewModel.Width = (int)Width;
+        if (e.CloseReason == WindowCloseReason.ApplicationShutdown || e.CloseReason == WindowCloseReason.OSShutdown)
+        {
+            base.OnClosing(e);
+            return;
+        }
         this.Hide();
         e.Cancel = true;
     }
 
     internal void NavigateTo(
         PageDefinition page,
-        SlideNavigationTransitionEffect effect = SlideNavigationTransitionEffect.FromBottom,
+        FASlideNavigationTransitionEffect effect = FASlideNavigationTransitionEffect.FromBottom,
         object? parameter = null)
     {
         _MainView.NavigateTo(page, effect, parameter);
@@ -40,15 +48,29 @@ public partial class MainWindow : Window, IMainWindow
 
     public void NavigateTo(PageDefinition page, NavigationTransitionEffect effect, object? para = null)
     {
-        SlideNavigationTransitionEffect platformEffect = effect switch
+        FASlideNavigationTransitionEffect platformEffect = effect switch
         {
-            NavigationTransitionEffect.FromBottom => SlideNavigationTransitionEffect.FromBottom,
-            NavigationTransitionEffect.FromLeft => SlideNavigationTransitionEffect.FromLeft,
-            NavigationTransitionEffect.FromRight => SlideNavigationTransitionEffect.FromRight,
-            NavigationTransitionEffect.FromTop => SlideNavigationTransitionEffect.FromTop,
+            NavigationTransitionEffect.FromBottom => FASlideNavigationTransitionEffect.FromBottom,
+            NavigationTransitionEffect.FromLeft => FASlideNavigationTransitionEffect.FromLeft,
+            NavigationTransitionEffect.FromRight => FASlideNavigationTransitionEffect.FromRight,
+            NavigationTransitionEffect.FromTop => FASlideNavigationTransitionEffect.FromTop,
             _ => throw new NotImplementedException()
         };
         _MainView.NavigateTo(page, platformEffect, para);
+    }
+
+    public void OpenPage(PageDefinition page, object? para)
+    {
+        void action()
+        {
+            this.ShowMainWindow();
+            var index = _viewModel.MainWindowPage.IndexOf(page);
+            if (index != -1)
+            {
+                _MainView._MenuList.SelectedIndex = _viewModel.MainWindowPage.IndexOf(page);
+            }
+        }
+        RunOnMainThread(action);
     }
 
     public void NavigateToLastLevel()
@@ -71,52 +93,27 @@ public partial class MainWindow : Window, IMainWindow
         _MainView.EnableScrollViewer();
     }
 
-    public void SetFont(string font)
-    {
-        if (string.IsNullOrEmpty(font))
-        {
-            App.Current.Resources["ProgramFont"] = App.Current.Resources["DefaultFont"];
-        }
-        else
-        {
-            App.Current.Resources["ProgramFont"] = new FontFamily(font);
-        }
-    }
-
-    public void ExitApp()
-    {
-        App.Current.ExitApp();
-    }
-
     protected virtual void ShowMainWindow()
     {
         this.Show();
         this.Activate();
     }
 
-    void IMainWindow.Show()
+    private void RunOnMainThread(Action action)
     {
         if (Dispatcher.UIThread.CheckAccess())
         {
-            ShowMainWindow();
+            action();
         }
         else
         {
-            Dispatcher.UIThread.InvokeAsync(new Action(() =>
-            {
-                ShowMainWindow();
-            }));
+            Dispatcher.UIThread.InvokeAsync(action);
         }
     }
 
-    public void ChangeTheme(string theme)
+    void IMainWindow.Show()
     {
-        App.Current.RequestedThemeVariant = theme switch
-        {
-            "Light" => ThemeVariant.Light,
-            "Dark" => ThemeVariant.Dark,
-            _ => ThemeVariant.Default,
-        };
+        RunOnMainThread(ShowMainWindow);
     }
 
     [RelayCommand]
@@ -124,4 +121,13 @@ public partial class MainWindow : Window, IMainWindow
 
     [RelayCommand]
     protected virtual void MinimizeWindow() => this.Close();
+
+    private void Window_KeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            this.Close();
+            e.Handled = true;
+        }
+    }
 }

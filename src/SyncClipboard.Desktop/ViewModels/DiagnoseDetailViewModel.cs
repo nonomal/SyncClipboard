@@ -1,22 +1,29 @@
 ﻿using Avalonia.Media.Imaging;
 using CommunityToolkit.Mvvm.ComponentModel;
 using ImageMagick;
+using Microsoft.Extensions.DependencyInjection;
+using SyncClipboard.Desktop.ClipboardAva.ClipboardReader;
 using System;
 using System.Diagnostics;
 using System.IO;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 
 namespace SyncClipboard.Desktop.ViewModels;
 
 internal partial class DiagnoseDetailViewModel : ObservableObject
 {
+    private readonly ClipboardReaderSelector Clipboard = App.Current.Services.GetRequiredService<ClipboardReaderSelector>();
+
     [ObservableProperty]
     private bool isImage;
     [ObservableProperty]
     private bool isText;
     [ObservableProperty]
     private bool isString;
+    [ObservableProperty]
+    private bool isNumber;
 
     [ObservableProperty]
     private string? csharpString;
@@ -44,6 +51,7 @@ internal partial class DiagnoseDetailViewModel : ObservableObject
         IsImage = false;
         IsString = false;
         IsText = false;
+        IsNumber = false;
         CsharpString = null;
         Ansi = null;
         Utf8 = null;
@@ -52,25 +60,51 @@ internal partial class DiagnoseDetailViewModel : ObservableObject
         Bitmap = null;
     }
 
-    public async Task Init(string type)
+    public async Task Init(string formatAndCSType)
     {
-        Clear();
-        var clipboard = await App.Current.Clipboard.GetDataAsync(type!);
-        if (clipboard is string str)
+        try
         {
-            IsString = true;
-            CsharpString = str;
-        }
+            Clear();
+            var type = formatAndCSType.Split(Environment.NewLine)[0];
+            var clipboard = await Clipboard.GetDataAsync(type!, CancellationToken.None);
+            if (clipboard is string str)
+            {
+                IsString = true;
+                CsharpString = str;
+            }
 
-        await ProcessImageBytes(clipboard);
-        if (IsImage is not true)
+            if (clipboard is int intValue)
+            {
+                IsNumber = true;
+                Int_32 = intValue;
+                Uint_32 = unchecked((uint)intValue);
+            }
+            else if (clipboard is uint uintValue)
+            {
+                IsNumber = true;
+                Int_32 = unchecked((int)uintValue);
+                Uint_32 = uintValue;
+            }
+
+            await ProcessImageBytes(clipboard);
+            if (IsImage is not true)
+            {
+                ProcessStringBytes(clipboard);
+            }
+        }
+        catch
         {
-            ProcessStringBytes(clipboard);
         }
     }
 
     private async Task ProcessImageBytes(object? clipboard)
     {
+        if (clipboard is Bitmap bitmap)
+        {
+            IsImage = true;
+            Bitmap = bitmap;
+        }
+
         if (clipboard is byte[] bytes)
         {
             try

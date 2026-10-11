@@ -1,11 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
-using SyncClipboard.Abstract;
-using SyncClipboard.Abstract.Notification;
+using NativeNotification.Interface;
 using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models.UserConfigs;
+using SyncClipboard.Core.Utilities;
+using SyncClipboard.Server.Core;
 
-namespace SyncClipboard.Core.UserServices;
+namespace SyncClipboard.Core.UserServices.ServerService;
 
 public class ServerService : Service
 {
@@ -23,7 +24,7 @@ public class ServerService : Service
     private readonly ILogger _logger;
     private readonly ITrayIcon _trayIcon;
 
-    private INotification NotificationManager => _serviceProvider.GetRequiredService<INotification>();
+    private INotificationManager NotificationManager => _serviceProvider.GetRequiredService<INotificationManager>();
 
     public ServerService(IServiceProvider serviceProvider)
     {
@@ -78,14 +79,20 @@ public class ServerService : Service
         {
             try
             {
-                app = await Server.Web.StartAsync(
+                app = await Web.StartAsync(
                     new ServerPara(
                         _serverConfig.Port,
                         Env.AppDataDirectory,
                         _serverConfig.UserName,
                         _serverConfig.Password,
-                        _serverConfig.ClientMixedMode,
+                        _serverConfig.EnableHttps,
+                        _serverConfig.CertificatePemPath,
+                        _serverConfig.CertificatePemKeyPath,
+                        _serverConfig.EnableCustomConfigurationFile,
+                        _serverConfig.CustomConfigurationFilePath,
                         _programConfig.DiagnoseMode,
+                        _serverConfig.MaxHistoryCount,
+                        _serverConfig.HistoryRetentionMinutes,
                         _serviceProvider
                     )
                 );
@@ -93,9 +100,9 @@ public class ServerService : Service
             }
             catch (Exception ex)
             {
-                _logger.Write(LOG_TAG, ex.ToString());
+                await _logger.WriteAsync(LOG_TAG, ex.ToString());
                 _trayIcon.SetStatusString(SERVICE_NAME, ex.Message, true);
-                NotificationManager.SendText(I18n.Strings.FailedToStartServer, ex.Message);
+                NotificationManager.ShowText(I18n.Strings.FailedToStartServer, ex.Message);
             }
         }
     }
@@ -103,6 +110,8 @@ public class ServerService : Service
     protected override void StopSerivce()
     {
         _trayIcon.SetStatusString(SERVICE_NAME, "Stopped.");
-        app?.StopAsync();
+        var oldApp = app;
+        app = null;
+        Task.Run(() => oldApp?.StopAsync());
     }
 }

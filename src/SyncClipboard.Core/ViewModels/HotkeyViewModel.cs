@@ -7,10 +7,6 @@ using System.Collections.ObjectModel;
 
 namespace SyncClipboard.Core.ViewModels;
 
-public record UniqueCommandViewModel(string Name, Guid Guid, bool IsError, Hotkey Hotkey);
-
-public record CommandCollectionViewModel(string Name, string FontIcon, List<UniqueCommandViewModel>? Commands);
-
 public partial class HotkeyViewModel : ObservableObject
 {
     [ObservableProperty]
@@ -20,6 +16,13 @@ public partial class HotkeyViewModel : ObservableObject
     private Hotkey editingHotkey = Hotkey.Nothing;
     partial void OnEditingHotkeyChanged(Hotkey value)
     {
+        var copyHotkey = new Hotkey(OperatingSystem.IsMacOS() ? Key.Meta : Key.Ctrl, Key.C);
+        if (value == copyHotkey)
+        {
+            IsEditingHasError = true;
+            return;
+        }
+
         IsEditingHasError = !_hotkeyManager.IsValidHotkeyForm(value);
     }
 
@@ -31,25 +34,30 @@ public partial class HotkeyViewModel : ObservableObject
     public bool SetHotkeyCanExecute => !IsEditingHasError;
 
     [ObservableProperty]
-    private Guid editingGuid;
+    private string editingCmdId = string.Empty;
 
     [RelayCommand(CanExecute = nameof(SetHotkeyCanExecute))]
     private void SetHotkey()
     {
-        _hotkeyManager.SetHotKey(EditingGuid, EditingHotkey);
+        _hotkeyManager.SetHotKey(EditingCmdId, EditingHotkey);
     }
 
     [RelayCommand]
     private void ClearEditingHotkey() => EditingHotkey = Hotkey.Nothing;
 
     [RelayCommand]
-    private void SetToDefault(Guid guid) => _hotkeyManager.SetHotKeyToDefault(guid);
+    private void SetToDefault(string cmdId) => _hotkeyManager.SetHotKeyToDefault(cmdId);
 
     private readonly HotkeyManager _hotkeyManager;
+    private readonly MainViewModel _mainViewModel;
 
-    public HotkeyViewModel(HotkeyManager hotkeyManager)
+    [RelayCommand]
+    private void OpenBlacklist() => _mainViewModel.NavigateToNextLevel(PageDefinition.HotkeyBlacklist);
+
+    public HotkeyViewModel(HotkeyManager hotkeyManager, MainViewModel mainViewModel)
     {
         _hotkeyManager = hotkeyManager;
+        _mainViewModel = mainViewModel;
         hotkeyManager.HotkeyStatusChanged += HotkeyStatusChanged;
         HotkeyStatusChanged();
     }
@@ -62,9 +70,9 @@ public partial class HotkeyViewModel : ObservableObject
             var commandList = new List<UniqueCommandViewModel>();
             foreach (var command in collection.Commands)
             {
-                var status = _hotkeyManager.HotkeyStatusMap[command.Guid];
+                var status = _hotkeyManager.HotkeyStatusMap[command.CmdId];
                 var isError = status.Hotkey is not null && !status.IsReady;
-                commandList.Add(new UniqueCommandViewModel(command.Name, command.Guid, isError, status.Hotkey ?? Hotkey.Nothing));
+                commandList.Add(new UniqueCommandViewModel(command.Name, command.CmdId, isError, status.Hotkey ?? Hotkey.Nothing));
             }
             collectionList.Add(new(collection.Name, collection.FontIcon, commandList));
         }

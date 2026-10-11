@@ -1,174 +1,322 @@
-using SyncClipboard.Core.Interfaces;
+using System.Collections;
+using System.Reflection;
+using NativeNotification.Interface;
+using SyncClipboard.Core.Commons.ConfigMigration;
 using SyncClipboard.Core.Models.UserConfigs;
+using SyncClipboard.Core.RemoteServer.Adapter;
 using SyncClipboard.Core.Utilities;
-using System.Diagnostics;
+using SyncClipboard.Shared.Attributes;
+using SyncClipboard.Shared.Interfaces;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 
-namespace SyncClipboard.Core.Commons
+namespace SyncClipboard.Core.Commons;
+
+public class ConfigManager : ConfigBase
 {
-    public class ConfigManager
+    private readonly SyncClipboardConfigUpgrader _configUpgrader;
+
+    private ConfigManager(
+        INotificationManager? notification,
+        SyncClipboardConfigUpgrader configUpgrader) : base(notification)
     {
-        public event Action? ConfigChanged;
+        _configUpgrader = configUpgrader;
+    }
 
-        private readonly string _path;
+    public ConfigManager(
+        StaticConfig staticConfig,
+        INotificationManager notification,
+        SyncClipboardConfigUpgrader configUpgrader) : this(notification, configUpgrader)
+    {
+        bool portableUserConfig = staticConfig.GetConfig<EnvConfig>().PortableUserConfig;
+        Path = GetConfigPath(portableUserConfig);
+        Reload();
+        staticConfig.ListenConfig<EnvConfig>(EnvConfigChanged);
+    }
 
-        private readonly Dictionary<string, Type> _registedTypeList = new();
-        private readonly Dictionary<string, HashSet<MessageDispatcher>> _registedChangedHandlerList = new();
+    internal ConfigManager(
+        string path,
+        SyncClipboardConfigUpgrader configUpgrader) : this((INotificationManager?)null, configUpgrader)
+    {
+        Path = path;
+        Reload();
+    }
 
-        JsonNode _jsonNode = new JsonObject();
+    public void Reload()
+    {
+        _configUpgrader.Upgrade(Path);
+        Load();
+    }
 
-        public ConfigManager()
+    public static void ValidateConfig(JsonObject root)
+    {
+        foreach (var config in SyncClipboardConfigRegistry.Configurations
+                     .Where(config => config.Storage == ConfigStorage.SyncClipboard))
         {
-            _path = Env.UserConfigFile;
-            Load();
-        }
-
-        public T? GetConfig<T>(string key)
-        {
-            var node = _jsonNode[key];
-            if (node is null)
+            if (root[config.Key] is { } node)
             {
-                return default;
-            }
-
-            return node.Deserialize<T>();
-        }
-
-        public T GetConfig<T>() where T : new()
-        {
-            return GetConfig<T>(ConfigKey.GetKeyFromType<T>()) ?? new();
-        }
-
-        public void RegistConfigType(string key, Type type)
-        {
-            if (_registedTypeList.Contains(new KeyValuePair<string, Type>(key, type)))
-            {
-                return;
-            }
-            else if (_registedTypeList.ContainsKey(key))
-            {
-                throw new Exception("Key & type pair are not same as existed.");
-            }
-
-            _registedTypeList.Add(key, type);
-        }
-
-        public void ListenConfig<T>(string key, MessageHandler<T> action)
-        {
-            RegistConfigType(key, typeof(T));
-            if (_registedChangedHandlerList.ContainsKey(key))
-            {
-                _registedChangedHandlerList[key].Add(new MessageDispatcher.For<T>(action));
-            }
-            else
-            {
-                _registedChangedHandlerList.Add(key, new HashSet<MessageDispatcher>() { new MessageDispatcher.For<T>(action) });
+                ValidateSection(config.Key, node, config.ConfigType);
             }
         }
 
-        public void ListenConfig<T>(MessageHandler<T> action)
+        ValidateSavedAccounts(root);
+    }
+
+    public bool RestoreCurrentConfig(string? sectionKey)
+    {
+        if (sectionKey is null)
         {
-            ListenConfig(ConfigKey.GetKeyFromType<T>(), action);
+            return Save();
         }
 
-        public void GetAndListenConfig<T>(MessageHandler<T> action) where T : new()
+        try
         {
-            ListenConfig(ConfigKey.GetKeyFromType<T>(), action);
-            action?.Invoke(GetConfig<T>());
+            SyncClipboardConfigUpgrader.RestoreSection(Path, sectionKey, GetNode(sectionKey));
+            return true;
+        }
+        catch (Exception exception)
+        {
+            NotificationManager?.ShowText("Failed to restore config section", exception.Message);
+            AppCore.TryGetCurrent()?.Logger.Write(
+                $"Failed to restore config section '{sectionKey}' to {Path}: {exception}");
+            return false;
+        }
+    }
+
+    private void EnvConfigChanged(EnvConfig envConfig)
+    {
+        Path = GetConfigPath(envConfig.PortableUserConfig);
+        Save();
+    }
+
+    public static string GetConfigPath(bool portableUserConfig) =>
+        portableUserConfig ? Env.PortableUserConfigFile : Env.UserConfigFile;
+
+    private static void ValidateSavedAccounts(JsonObject root)
+    {
+        if (root[AccountConfig.SavedAccountsConfigKey] is not { } savedAccountsNode)
+        {
+            return;
         }
 
-        public void SetConfig<T>(string key, T newValue) where T : IEquatable<T>
+        JsonObject savedAccounts;
+        try
         {
-            ArgumentNullException.ThrowIfNull(newValue);
-            RegistConfigType(key, typeof(T));
-
-            var exist = _jsonNode[key];
-            if (exist is not null)
-            {
-                var oldValue = exist.Deserialize<T>();
-                if (newValue.Equals(oldValue))
-                {
-                    return;
-                }
-            }
-
-            _jsonNode[key] = JsonSerializer.SerializeToNode(newValue);
-            NotifyRegistedHandler(key, typeof(T), _jsonNode[key]);
-            ConfigChanged?.Invoke();
-            Save();
+            savedAccounts = savedAccountsNode.AsObject();
+        }
+        catch (Exception exception)
+        {
+            throw new SyncClipboardConfigUpgradeException(
+                $"Configuration section '{AccountConfig.SavedAccountsConfigKey}' must be a JSON object.",
+                AccountConfig.SavedAccountsConfigKey,
+                exception);
         }
 
-        public void SetConfig<T>(T newValue) where T : IEquatable<T>
+        foreach (var accountTypeNode in savedAccounts)
         {
-            SetConfig(ConfigKey.GetKeyFromType<T>(), newValue);
-        }
+            var adapterConfig = AccountConfigRegistry.GetRegistration(accountTypeNode.Key)
+                ?? throw new SyncClipboardConfigUpgradeException(
+                    $"Configuration section '{AccountConfig.SavedAccountsConfigKey}' contains unsupported account type '{accountTypeNode.Key}'.",
+                    AccountConfig.SavedAccountsConfigKey);
 
-        private void NotifyRegistedHandler(string key, Type type, JsonNode? jsonNode)
-        {
-            if (!_registedChangedHandlerList.ContainsKey(key))
-            {
-                return;
-            }
-            foreach (var handler in _registedChangedHandlerList[key])
-            {
-                var obj = jsonNode.Deserialize(type);
-                if (obj is not null)
-                {
-                    handler.Invoke(obj);
-                }
-            }
-        }
-
-        private void NotifyAllRegistedHandler()
-        {
-            foreach (var configNode in _jsonNode.AsObject())
-            {
-                if (_registedTypeList.ContainsKey(configNode.Key))
-                {
-                    NotifyRegistedHandler(configNode.Key, _registedTypeList[configNode.Key], configNode.Value);
-                }
-            }
-        }
-
-        private void Save()
-        {
-            var jsonString = _jsonNode.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
-            File.WriteAllText(_path, jsonString);
-        }
-
-        public void Load()
-        {
+            JsonObject accounts;
             try
             {
-                var text = File.ReadAllText(_path);
-                _jsonNode = JsonNode.Parse(text) ?? new JsonObject();
+                accounts = accountTypeNode.Value?.AsObject()
+                    ?? throw new JsonException("The account collection cannot be null.");
             }
-            catch
+            catch (Exception exception)
             {
-                _jsonNode = new JsonObject();
-                Save();
+                throw new SyncClipboardConfigUpgradeException(
+                    $"Account collection '{accountTypeNode.Key}' is invalid.",
+                    AccountConfig.SavedAccountsConfigKey,
+                    exception);
             }
-            NotifyAllRegistedHandler();
-            ConfigChanged?.Invoke();
+
+            foreach (var account in accounts)
+            {
+                if (account.Value is null)
+                {
+                    throw new SyncClipboardConfigUpgradeException(
+                        $"Account '{accountTypeNode.Key}/{account.Key}' cannot be null.",
+                        AccountConfig.SavedAccountsConfigKey);
+                }
+
+                ValidateSection(
+                    $"{AccountConfig.SavedAccountsConfigKey}.{accountTypeNode.Key}.{account.Key}",
+                    account.Value,
+                    adapterConfig.ConfigType,
+                    AccountConfig.SavedAccountsConfigKey);
+            }
+        }
+    }
+
+    private static void ValidateSection(
+        string key,
+        JsonNode node,
+        Type configType,
+        string? recoverableSectionKey = null)
+    {
+        try
+        {
+            var config = node.Deserialize(configType)
+                ?? throw new JsonException("The configuration section cannot be null.");
+
+            ValidateNonNullableMembers(config, key);
+
+            if (config is IConfigValidator validator)
+            {
+                validator.Validate();
+            }
+        }
+        catch (Exception exception)
+        {
+            throw new SyncClipboardConfigUpgradeException(
+                $"Configuration section '{key}' is invalid.",
+                recoverableSectionKey ?? key,
+                exception);
+        }
+    }
+
+    private static void ValidateNonNullableMembers(object config, string path)
+    {
+        var nullabilityContext = new NullabilityInfoContext();
+        var visited = new HashSet<object>(ReferenceEqualityComparer.Instance);
+        ValidateObject(config, path, nullabilityContext, visited);
+    }
+
+    private static void ValidateObject(
+        object value,
+        string path,
+        NullabilityInfoContext nullabilityContext,
+        HashSet<object> visited)
+    {
+        var valueType = value.GetType();
+        if (IsTerminalType(valueType)
+            || (!valueType.IsValueType && !visited.Add(value)))
+        {
+            return;
         }
 
-        public MenuItem[] Menu => new[]
+        foreach (var property in valueType.GetProperties(BindingFlags.Instance | BindingFlags.Public))
         {
-#if MACOS
-            new MenuItem(I18n.Strings.OpenConfigFile, () => Process.Start("open", $"-a TextEdit \"{_path}\"")),
-            new MenuItem(I18n.Strings.ReloadConfigFile, Load),
-            new MenuItem(I18n.Strings.OpenConfigFileFolder, () => Process.Start("open", $"-R \"{_path}\""))
-#endif
-#if WINDOWS     
-            new MenuItem(I18n.Strings.OpenConfigFile, () => Process.Start("notepad", _path)),
-            new MenuItem(I18n.Strings.ReloadConfigFile, Load),
-            new MenuItem(I18n.Strings.OpenConfigFileFolder, () => Process.Start("explorer", $"/e,/select,{_path}"))
-#endif
-#if LINUX
-            new MenuItem(I18n.Strings.OpenConfigFile, () => Sys.OpenWithDefaultApp(_path)),
-            new MenuItem(I18n.Strings.ReloadConfigFile, Load),
-#endif
-        };
+            if (property.GetMethod is null
+                || property.GetMethod.IsStatic
+                || property.GetIndexParameters().Length != 0
+                || property.GetCustomAttribute<JsonIgnoreAttribute>()?.Condition == JsonIgnoreCondition.Always)
+            {
+                continue;
+            }
+
+            var nullability = nullabilityContext.Create(property);
+            ValidateValue(
+                property.GetValue(value),
+                nullability,
+                $"{path}.{property.Name}",
+                nullabilityContext,
+                visited);
+        }
     }
+
+    private static void ValidateValue(
+        object? value,
+        NullabilityInfo? nullability,
+        string path,
+        NullabilityInfoContext nullabilityContext,
+        HashSet<object> visited)
+    {
+        if (value is null)
+        {
+            ValidateNullValue(nullability, path);
+            return;
+        }
+
+        var valueType = value.GetType();
+        ValidateEnumValue(value, valueType, path);
+        if (IsTerminalType(valueType))
+        {
+            return;
+        }
+
+        if (value is IDictionary dictionary)
+        {
+            ValidateDictionary(dictionary, nullability, path, nullabilityContext, visited);
+            return;
+        }
+
+        if (value is IEnumerable enumerable)
+        {
+            ValidateEnumerable(enumerable, nullability, path, nullabilityContext, visited);
+            return;
+        }
+
+        ValidateObject(value, path, nullabilityContext, visited);
+    }
+
+    private static void ValidateNullValue(NullabilityInfo? nullability, string path)
+    {
+        if (nullability?.ReadState == NullabilityState.NotNull)
+        {
+            throw new JsonException($"Configuration value '{path}' cannot be null.");
+        }
+    }
+
+    private static void ValidateEnumValue(object value, Type valueType, string path)
+    {
+        if (valueType.IsEnum && !Enum.IsDefined(valueType, value))
+        {
+            throw new JsonException(
+                $"Configuration value '{path}' contains undefined {valueType.Name} value '{value}'.");
+        }
+    }
+
+    private static void ValidateDictionary(
+        IDictionary dictionary,
+        NullabilityInfo? nullability,
+        string path,
+        NullabilityInfoContext nullabilityContext,
+        HashSet<object> visited)
+    {
+        var genericArguments = nullability?.GenericTypeArguments;
+        var keyNullability = genericArguments is { Length: 2 } ? genericArguments[0] : null;
+        var valueNullability = genericArguments is { Length: 2 } ? genericArguments[1] : null;
+
+        foreach (DictionaryEntry entry in dictionary)
+        {
+            var itemPath = $"{path}[{entry.Key}]";
+            ValidateValue(entry.Key, keyNullability, $"{itemPath}.Key", nullabilityContext, visited);
+            ValidateValue(entry.Value, valueNullability, itemPath, nullabilityContext, visited);
+        }
+    }
+
+    private static void ValidateEnumerable(
+        IEnumerable enumerable,
+        NullabilityInfo? nullability,
+        string path,
+        NullabilityInfoContext nullabilityContext,
+        HashSet<object> visited)
+    {
+        var elementNullability = nullability?.ElementType
+            ?? (nullability?.GenericTypeArguments is { Length: 1 } genericArguments
+                ? genericArguments[0]
+                : null);
+        var index = 0;
+        foreach (var item in enumerable)
+        {
+            ValidateValue(item, elementNullability, $"{path}[{index}]", nullabilityContext, visited);
+            index++;
+        }
+    }
+
+    private static bool IsTerminalType(Type type) =>
+        type.IsPrimitive
+        || type.IsEnum
+        || type == typeof(string)
+        || type == typeof(decimal)
+        || type == typeof(DateTime)
+        || type == typeof(DateTimeOffset)
+        || type == typeof(TimeSpan)
+        || type == typeof(Guid)
+        || type == typeof(Uri);
 }

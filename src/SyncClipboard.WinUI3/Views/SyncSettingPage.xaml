@@ -8,6 +8,7 @@
       xmlns:i18n="using:SyncClipboard.Core.I18n"
       xmlns:vm="using:SyncClipboard.Core.ViewModels"
       xmlns:vc="using:SyncClipboard.WinUI3.ValueConverters"
+      xmlns:models="using:SyncClipboard.Core.Models"
       xmlns:local="using:SyncClipboard.WinUI3.Views"
       MinWidth="550"
       d:DataContext="{d:DesignInstance vm:SyncSettingViewModel}"
@@ -15,11 +16,12 @@
       mc:Ignorable="d">
     <Page.Resources>
         <vc:BoolToPasswordIconConverter x:Key="BoolToPasswordIconConverter" />
+        <vc:ObjectToVisibilityConverter x:Key="ObjectToVisibilityConverter" />
         <!--<Thickness x:Key="SettingsCardPadding">16,16,60,16</Thickness>
         <Thickness x:Key="SettingsExpanderItemPadding">58,8,60,8</Thickness>
         <Thickness x:Key="ClickableSettingsExpanderItemPadding">58,0,32,0</Thickness>
         <Thickness x:Key="SettingsExpanderItemBorderThickness">0,0,0,0</Thickness>-->
-        <Style TargetType="Button" BasedOn="{StaticResource DateTimePickerFlyoutButtonStyle}">
+        <Style x:Key="IconButtonStyle" TargetType="Button" BasedOn="{StaticResource DateTimePickerFlyoutButtonStyle}">
             <Setter Property="Height" Value="32" />
             <Setter Property="Width" Value="32" />
             <Setter Property="Padding" Value="0,0,0,0" />
@@ -33,106 +35,83 @@
         </Style>
     </Page.Resources>
     <StackPanel Spacing="10">
-        <ui:SettingsExpander Header="{x:Bind i18n:Strings.Server}" Description="{x:Bind i18n:Strings.ServerDescription}" IsExpanded="True">
+        <ui:SettingsExpander Header="{x:Bind i18n:Strings.SyncAccount}" IsExpanded="True">
             <ui:SettingsExpander.HeaderIcon>
-                <FontIcon Glyph="&#xE753;" />
+                <FontIcon Glyph="&#xE13D;" />
             </ui:SettingsExpander.HeaderIcon>
-            <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{Binding ServerEnable, Mode=TwoWay}" />
+            <StackPanel>
+                <ComboBox MinWidth="200"
+                          ItemsSource="{x:Bind _viewModel.SavedAccounts, Mode=OneWay}"
+                          SelectedItem="{x:Bind _viewModel.SelectedAccount, Mode=TwoWay}"
+                          PlaceholderText="{x:Bind i18n:Strings.SelectAccount}"
+                          Visibility="{x:Bind vc:ConvertMethod.BoolToVisibility(_viewModel.IsLoggedIn), Mode=OneWay}">
+                    <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="models:DisplayedAccountConfig">
+                            <TextBlock Text="{x:Bind DisplayName}" />
+                        </DataTemplate>
+                    </ComboBox.ItemTemplate>
+                </ComboBox>
+                <TextBlock Text="{x:Bind i18n:Strings.PleaseAddAccount}" Visibility="{x:Bind vc:ConvertMethod.BoolToVisibility(_viewModel.IsNotLoggedIn), Mode=OneWay}" />
+            </StackPanel>
             <ui:SettingsExpander.Items>
-                <ui:SettingsCard Description="{x:Bind _viewModel.ServerConfigDescription, Mode=OneWay}">
-                    <StackPanel Orientation="Horizontal" Spacing="5">
-                        <ToggleButton IsChecked="{x:Bind _viewModel.ShowServerPassword, Mode=TwoWay}">
-                            <FontIcon Glyph="{x:Bind _viewModel.ShowServerPassword, Mode=OneWay, Converter={StaticResource BoolToPasswordIconConverter}}" />
-                        </ToggleButton>
-                        <Button Command="{x:Bind SetServerCommand}">
-                            <FontIcon Glyph="&#xE115;" />
-                        </Button>
-                    </StackPanel>
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.AddAccount}" IsClickEnabled="True" Command="{x:Bind _viewModel.AddAccountCommand}" />
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.EditAccountConfig}"
+                                 IsClickEnabled="True"
+                                 Command="{x:Bind _viewModel.EditAccountCommand}"
+                                 Visibility="{x:Bind vc:ConvertMethod.BoolToVisibility(_viewModel.HasSelectedAccount), Mode=OneWay}">
+                    <Button MinWidth="60" Content="{x:Bind i18n:Strings.DeleteAccount}" Command="{x:Bind _viewModel.RemoveAccountCommand}" />
                 </ui:SettingsCard>
-                <ui:SettingsCard Header="{x:Bind i18n:Strings.MixedClientMode}">
-                    <StackPanel Orientation="Horizontal" Spacing="12">
-                        <Button Width="32"
-                                Height="32"
-                                Padding="0"
-                                Content="&#xE9CE;"
-                                FontFamily="{ThemeResource SymbolThemeFontFamily}"
-                                Style="{ThemeResource DateTimePickerFlyoutButtonStyle}">
-                            <Button.Flyout>
-                                <Flyout>
-                                    <TextBlock Width="400" TextWrapping="WrapWholeWords">
-                                        <Run Text="{x:Bind i18n:Strings.MixedClientOnInfo}" />
-                                        <LineBreak /><LineBreak /><Run Text="{x:Bind i18n:Strings.MixedClientOffInfo}" />
-                                    </TextBlock>
-                                </Flyout>
-                            </Button.Flyout>
-                        </Button>
-                        <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.ClientMixedMode, Mode=TwoWay}" />
-                    </StackPanel>
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.AutoSwitchAccount}"
+                                 Description="{x:Bind _viewModel.AccountAutoSwitchDescription, Mode=OneWay}"
+                                 IsClickEnabled="True"
+                                 Command="{x:Bind _viewModel.OpenNetworkAccountSwitchCommand}">
+                    <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.AccountAutoSwitchEnabled, Mode=TwoWay}" />
                 </ui:SettingsCard>
             </ui:SettingsExpander.Items>
         </ui:SettingsExpander>
-        <ui:SettingsExpander Header="{x:Bind i18n:Strings.ClipboardSyncing}" IsExpanded="{Binding IsNormalClientEnable, Mode=OneWay}" IsEnabled="{x:Bind _viewModel.IsNormalClientEnable, Mode=OneWay}">
+        <ui:SettingsExpander Header="{x:Bind i18n:Strings.ClipboardSyncing}" IsExpanded="True">
             <ui:SettingsExpander.HeaderIcon>
                 <FontIcon Glyph="&#xE117;" />
             </ui:SettingsExpander.HeaderIcon>
             <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.SyncEnable, Mode=TwoWay}" />
             <ui:SettingsExpander.Items>
-                <ui:SettingsCard Description="{x:Bind i18n:Strings.UseBuiltInServerDescription}" Header="{x:Bind i18n:Strings.UseSelfHostServer}">
-                    <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.UseLocalServer, Mode=TwoWay}" />
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.QueryInterval}" Visibility="{x:Bind vc:ConvertMethod.BoolToVisibility(_viewModel.ShowQueryInterval), Mode=OneWay}">
+                    <NumberBox Minimum="0"
+                               Maximum="100000"
+                               Value="{x:Bind _viewModel.IntervalTime, Mode=TwoWay}"
+                               SpinButtonPlacementMode="Inline"
+                               SmallChange="1" />
                 </ui:SettingsCard>
-                <ui:SettingsCard Visibility="{x:Bind vc:ConvertMethod.BoolToVisibility(_viewModel.UseManulServer), Mode=OneWay}" Description="{x:Bind _viewModel.ClientConfigDescription, Mode=OneWay}">
-                    <StackPanel Orientation="Horizontal" Spacing="5">
-                        <ToggleButton IsChecked="{x:Bind _viewModel.ShowClientPassword, Mode=TwoWay}">
-                            <FontIcon Glyph="{x:Bind _viewModel.ShowClientPassword, Mode=OneWay, Converter={StaticResource BoolToPasswordIconConverter}}" />
-                        </ToggleButton>
-                        <Button Command="{x:Bind SetSyncCommand}">
-                            <FontIcon Glyph="&#xE115;" />
-                        </Button>
-                    </StackPanel>
-                </ui:SettingsCard>
-                <ui:SettingsCard Visibility="{x:Bind vc:ConvertMethod.BoolToVisibility(_viewModel.UseManulServer), Mode=OneWay}" Header="{x:Bind i18n:Strings.TrustInsecureCertificate}">
-                    <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.TrustInsecureCertificate, Mode=TwoWay}" />
-                </ui:SettingsCard>
-                <ui:SettingsCard VerticalContentAlignment="Stretch" Visibility="{x:Bind vc:ConvertMethod.BoolToVisibility(_viewModel.UseManulServer), Mode=OneWay}" ContentAlignment="Vertical">
-                    <!-- 第三方登录数量大于等于2时，不再使用Descrition，直接在Content中使用Stackpanel包装多个HyperlinkButton，并使用以下style
-                        <ui:SettingsCard.Resources>
-                        <Style BasedOn="{StaticResource DefaultHyperlinkButtonStyle}" TargetType="HyperlinkButton">
-                            <Style.Setters>
-                                <Setter Property="FontSize" Value="12" />
-                                <Setter Property="Padding" Value="0,0,0,-1" />
-                                <Setter Property="FontWeight" Value="SemiBold" />
-                            </Style.Setters>
-                        </Style>
-                    </ui:SettingsCard.Resources>-->
-                    <ui:SettingsCard.Description>
-                        <HyperlinkButton Content="{x:Bind i18n:Strings.UseNextcloud}" Command="{x:Bind _viewModel.LoginWithNextcloudCommand}" />
-                    </ui:SettingsCard.Description>
-                </ui:SettingsCard>
-                <ui:SettingsCard Header="{x:Bind i18n:Strings.QueryInterval}">
-                    <NumberBox Minimum="0" Maximum="100000" Value="{x:Bind _viewModel.IntervalTime, Mode=TwoWay}" />
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.RetryTimes}">
+                    <NumberBox Minimum="0"
+                               Maximum="100000"
+                               Value="{x:Bind _viewModel.RetryTimes, Mode=TwoWay}"
+                               SpinButtonPlacementMode="Inline"
+                               SmallChange="1" />
                 </ui:SettingsCard>
                 <ui:SettingsCard Header="{x:Bind i18n:Strings.TimeoutPeriod}">
-                    <NumberBox Minimum="0" Maximum="100000" Value="{x:Bind _viewModel.TimeOut, Mode=TwoWay}" />
+                    <NumberBox Minimum="0"
+                               Maximum="100000"
+                               Value="{x:Bind _viewModel.TimeOut, Mode=TwoWay}"
+                               SpinButtonPlacementMode="Inline"
+                               SmallChange="1" />
                 </ui:SettingsCard>
-                <ui:SettingsCard Header="{x:Bind i18n:Strings.DeleteServerTemporaryFileAutoly}">
-                    <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.AutoDeleleServerFile, Mode=TwoWay}" />
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.SendNotificationAfterManuallyUpload}">
+                    <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.NotifyOnManualUpload, Mode=TwoWay}" />
                 </ui:SettingsCard>
-            </ui:SettingsExpander.Items>
-        </ui:SettingsExpander>
-        <ui:SettingsExpander Header="{x:Bind i18n:Strings.ClientGeneral}" IsExpanded="True">
-            <ui:SettingsExpander.HeaderIcon>
-                <FontIcon Glyph="&#xE90F;" />
-            </ui:SettingsExpander.HeaderIcon>
-            <ui:SettingsExpander.Items>
                 <ui:SettingsCard Header="{x:Bind i18n:Strings.SendNotificationAfterUpdateLocalClipboard}">
                     <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.NotifyOnDownloaded, Mode=TwoWay}" />
                 </ui:SettingsCard>
-                <ui:SettingsCard Header="{x:Bind i18n:Strings.MaxFileSizeToUpload}">
-                    <NumberBox Minimum="0" Maximum="100000" Value="{x:Bind _viewModel.MaxFileSize, Mode=TwoWay}" />
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.NotifyFileSyncProgress}">
+                    <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.NotifyFileSyncProgress, Mode=TwoWay}" />
                 </ui:SettingsCard>
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.IgnoreExcludeForSyncSuggestion}" Description="{x:Bind i18n:Strings.IgnoreExcludeForSyncSuggestionDescription}">
+                    <ToggleSwitch OnContent="{x:Bind i18n:Strings.On}" OffContent="{x:Bind i18n:Strings.Off}" IsOn="{x:Bind _viewModel.IgnoreExcludeForSyncSuggestion, Mode=TwoWay}" />
+                </ui:SettingsCard>
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.SyncContentControl}" IsClickEnabled="True" Command="{x:Bind _viewModel.OpenSyncContentControlPageCommand}" />
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.ClipboardOwnerFilter}" IsClickEnabled="True" Command="{x:Bind _viewModel.SetClipboardOwnerFilterCommand}" />
+                <ui:SettingsCard Header="{x:Bind i18n:Strings.ClipboardAcquisitionRules}" IsClickEnabled="True" Command="{x:Bind _viewModel.OpenClipboardAcquisitionRulesPageCommand}" />
             </ui:SettingsExpander.Items>
         </ui:SettingsExpander>
-        <local:ServerSettingDialog x:Name="_ServerSettingDialog" PrimaryButtonClick="ServerSettingDialog_OkClick" TextBoxName="{x:Bind i18n:Strings.Port}" />
-        <local:ServerSettingDialog x:Name="_SyncSettingDialog" PrimaryButtonClick="SyncSettingDialog_OkClick" TextBoxName="{x:Bind i18n:Strings.Address}" />
     </StackPanel>
 </Page>

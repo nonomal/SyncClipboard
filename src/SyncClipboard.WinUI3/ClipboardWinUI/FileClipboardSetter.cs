@@ -1,4 +1,4 @@
-﻿using SyncClipboard.Core.Clipboard;
+using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Models;
 using System;
 using System.Collections.Generic;
@@ -11,35 +11,36 @@ namespace SyncClipboard.WinUI3.ClipboardWinUI;
 
 internal class FileClipboardSetter : ClipboardSetterBase<FileProfile>, IClipboardSetter<GroupProfile>
 {
-    public static string[] UnusualType = { ".lnk", ".url", ".wsh" };
+    public static string[] UnusualType = [".lnk", ".url", ".wsh"];
 
-    protected override async Task<DataPackage> CreatePackage(ClipboardMetaInfomation metaInfomation)
+    public override async Task FillPackage(object package, ClipboardMetaInfomation metaInfomation)
     {
         if (metaInfomation.Files is null || metaInfomation.Files.Length == 0)
         {
             throw new ArgumentException("Not Contain File.");
         }
 
-        List<IStorageItem> list = new();
-        foreach (var file in metaInfomation.Files)
+        if (package is DataPackage dataPackage)
         {
-            if (Directory.Exists(file))
+            List<IStorageItem> list = [];
+            foreach (var file in metaInfomation.Files)
             {
-                list.Add(await StorageFolder.GetFolderFromPathAsync(file));
+                if (Directory.Exists(file))
+                {
+                    list.Add(await StorageFolder.GetFolderFromPathAsync(file));
+                }
+                else if (IsUnusualType(file))
+                {
+                    list.Add(new UnusualStorageItem(file));
+                }
+                else
+                {
+                    list.Add(await StorageFile.GetFileFromPathAsync(file));
+                }
             }
-            else if (IsUnusualType(file))
-            {
-                list.Add(new UnusualStorageItem(file));
-            }
-            else
-            {
-                list.Add(await StorageFile.GetFileFromPathAsync(file));
-            }
-        }
 
-        var dataObject = new DataPackage();
-        dataObject.SetStorageItems(list, false);
-        return dataObject;
+            dataPackage.SetStorageItems(list, false);
+        }
     }
 
     public static bool IsUnusualType(string file)

@@ -1,4 +1,4 @@
-﻿using SyncClipboard.Core.Clipboard;
+using SyncClipboard.Core.Clipboard;
 using SyncClipboard.Core.Interfaces;
 using SyncClipboard.Core.Models;
 using System;
@@ -7,31 +7,31 @@ using System.Threading.Tasks;
 
 namespace SyncClipboard.Desktop.ClipboardAva;
 
-internal class ClipboardListener : ClipboardChangingListenerBase
+internal class ClipboardListener(
+    IClipboardFactory clipboardFactory,
+    IClipboardFingerprintProvider fingerprintProvider,
+    ILogger logger) : ClipboardChangingListenerBase
 {
-    private readonly IClipboardFactory _clipboardFactory;
-    private readonly ILogger _logger;
+    protected override IClipboardFactory ClipboardFactory { get; } = clipboardFactory;
+    private readonly IClipboardFingerprintProvider _fingerprintProvider = fingerprintProvider;
+    private readonly ILogger _logger = logger;
 
     private Timer? _timer;
-    private Action<ClipboardMetaInfomation>? _action;
+    private MetaChanged? _action;
     private ClipboardMetaInfomation? _meta;
+
+    private int? _lastFingerprint;
 
     private readonly SemaphoreSlim _tickSemaphore = new(1, 1);
     private CancellationTokenSource? _cts;
 
-    public ClipboardListener(IClipboardFactory clipboardFactory, ILogger logger)
-    {
-        _clipboardFactory = clipboardFactory;
-        _logger = logger;
-    }
-
-    protected override void RegistSystemEvent(Action<ClipboardMetaInfomation> action)
+    protected override void RegistSystemEvent(MetaChanged action)
     {
         _action = action;
         _timer = new Timer(InvokeTick, null, TimeSpan.Zero, TimeSpan.FromSeconds(1));
     }
 
-    protected override void UnRegistSystemEvent(Action<ClipboardMetaInfomation> action)
+    protected override void UnRegistSystemEvent(MetaChanged action)
     {
         _timer?.Dispose();
         _timer = null;
@@ -41,6 +41,14 @@ internal class ClipboardListener : ClipboardChangingListenerBase
         _cts?.Cancel();
         _cts?.Dispose();
         _cts = null;
+    }
+
+    internal void TriggerClipboardChangedEvent()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _cts = null;
+        InvokeTick(null);
     }
 
     private async void InvokeTick(object? _)
@@ -53,23 +61,31 @@ internal class ClipboardListener : ClipboardChangingListenerBase
         try
         {
             _cts?.Dispose();
-            _cts = new CancellationTokenSource(TimeSpan.FromSeconds(1000));
+            _cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
 
-            var meta = await _clipboardFactory.GetMetaInfomation(_cts.Token);
+            var currentFingerprint = await _fingerprintProvider.GetClipboardFingerprint(_cts.Token);
+
+            if (currentFingerprint is not null && currentFingerprint == _lastFingerprint)
+            {
+                return;
+            }
+
+            var meta = await ((ClipboardFactory)ClipboardFactory).GetMetaInfomation(currentFingerprint, _cts.Token);
+            if (!meta.Empty())
+            {
+                _lastFingerprint = currentFingerprint;
+            }
             if (meta == _meta)
             {
                 return;
             }
 
+            _meta = meta;
             if (_meta is not null)
             {
-                _meta = meta;
+                ClipboardFactory.SetClipboardOwner(_meta);
                 _ = Task.Run(() => _action?.Invoke(meta));
                 _ = _logger.WriteAsync($"Clipboard changed to {meta}");
-            }
-            else
-            {
-                _meta = meta;
             }
         }
         catch { }

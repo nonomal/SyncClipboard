@@ -52,10 +52,10 @@ internal class TrayIconContextMenu : ContextMenuBase
         {
             Header = menuitem.Text,
             IsChecked = menuitem.Checked,
-            ToggleType = NativeMenuItemToggleType.CheckBox
+            ToggleType = MenuItemToggleType.CheckBox
         };
 
-        menuitem.CheckedChanged += (bool status) => Dispatcher.UIThread.Post(() => item.IsChecked = status);
+        menuitem.CheckedChanged += status => Dispatcher.UIThread.Post(() => item.IsChecked = status);
 
         if (menuitem.Action is not null)
         {

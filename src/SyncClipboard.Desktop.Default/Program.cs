@@ -1,4 +1,6 @@
 ﻿using Avalonia;
+using Avalonia.Media;
+using SyncClipboard.Core.Commons;
 using SyncClipboard.Core.Utilities;
 
 namespace SyncClipboard.Desktop.Default;
@@ -9,23 +11,35 @@ class Program
     // SynchronizationContext-reliant code before AppMain is called: things aren't initialized
     // yet and stuff might break.
     [STAThread]
-    public static void Main(string[] args)
+    public static int Main(string[] args)
     {
-        using var mutex = AppInstance.EnsureSingleInstance();
-        if (mutex is null)
+        if (StartUpHelper.TryUpdateWindowsStartupTaskFromArguments(args, out var returnCode))
         {
-            return;
+            return returnCode;
+        }
+
+        if (AppInstance.EnsureSingleInstance(args) is false)
+        {
+            return (int)ReturnCode.Success;
         }
 
         try
         {
-            BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
+            return BuildAvaloniaApp().StartWithClassicDesktopLifetime(args);
         }
         catch (Exception e)
         {
-            App.Current?.Logger?.Write($"UnhandledException {e.GetType()} {e.Message}");
-            App.Current?.AppCore?.Stop();
+            var path = Path.Combine(Env.LogFolder, $"{DateTime.Now:yyyy-MM-dd HH-mm-ss}.dmp");
+            File.WriteAllText(path + ".txt", $"UnhandledException {e.GetType()} {e.Message} \n{e.StackTrace}");
+            App.Current?.Logger?.Write($"UnhandledException {e.GetType()} {e.Message} \n {e.StackTrace}");
+            App.Current?.AppCore?.ExitAsync().GetAwaiter().GetResult();
+            return (int)ReturnCode.UnhandledException;
         }
+    }
+
+    private static string Font(string name)
+    {
+        return $"avares://SyncClipboard.Desktop.Default/Assets/Fonts#{name}";
     }
 
     // Avalonia configuration, don't remove; also used by visual designer.
@@ -33,5 +47,9 @@ class Program
         => AppBuilder.Configure(() => new App(AppServices.ConfigureServices()))
             .UsePlatformDetect()
             .WithInterFont()
-            .LogToTrace();
+            .LogToTrace()
+            .With(new FontManagerOptions
+            {
+                DefaultFamilyName = $"{Font("MiSans")}",
+            });
 }

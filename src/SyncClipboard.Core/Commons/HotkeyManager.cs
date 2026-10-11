@@ -3,7 +3,6 @@ using SyncClipboard.Core.Models;
 using SyncClipboard.Core.Models.Keyboard;
 using SyncClipboard.Core.Models.UserConfigs;
 using SyncClipboard.Core.Utilities;
-using SyncClipboard.Core.ViewModels;
 using System.Collections.ObjectModel;
 
 namespace SyncClipboard.Core.Commons;
@@ -12,19 +11,21 @@ public class HotkeyManager
 {
     private readonly INativeHotkeyRegistry _nativeHotkeyRegistry;
     private readonly ConfigManager _configManager;
-    private readonly List<UniqueCommandCollection> _commandCollections = new List<UniqueCommandCollection>();
-    private readonly Dictionary<Guid, HotkeyStatus> _hotkeyCommandMap = new();
+    private readonly List<UniqueCommandCollection> _commandCollections = [];
+    private readonly Dictionary<string, HotkeyStatus> _hotkeyCommandMap = [];
+    private readonly Lock _registrationLock = new();
 
     private HotkeyConfig _hotkeyConfig = new();
 
     public ReadOnlyCollection<UniqueCommandCollection> CommandCollections { get; }
-    public ReadOnlyDictionary<Guid, HotkeyStatus> HotkeyStatusMap { get; }
+    public ReadOnlyDictionary<string, HotkeyStatus> HotkeyStatusMap { get; }
+    public bool IsSystemHotkeysSuspended { get; private set; }
     public event Action? HotkeyStatusChanged;
 
     public HotkeyManager(INativeHotkeyRegistry nativeHotkeyRegistry, ConfigManager configManager)
     {
         CommandCollections = _commandCollections.AsReadOnly();
-        HotkeyStatusMap = new ReadOnlyDictionary<Guid, HotkeyStatus>(_hotkeyCommandMap);
+        HotkeyStatusMap = new ReadOnlyDictionary<string, HotkeyStatus>(_hotkeyCommandMap);
 
         _nativeHotkeyRegistry = nativeHotkeyRegistry;
         _configManager = configManager;
@@ -34,6 +35,11 @@ public class HotkeyManager
 
     private bool RegisterToNative(Hotkey hotkey, Action action)
     {
+        if (IsSystemHotkeysSuspended)
+        {
+            return false;
+        }
+
         if (hotkey.Keys.Length is 0)
         {
             return true;
@@ -54,12 +60,12 @@ public class HotkeyManager
         }
     }
 
-    private List<UniqueCommand> DeleteHotkeyCommandMap(IEnumerable<Guid> guids)
+    private List<UniqueCommand> DeleteHotkeyCommandMap(IEnumerable<string> ids)
     {
-        List<UniqueCommand> registedCommands = new();
-        foreach (var guid in guids)
+        List<UniqueCommand> registedCommands = [];
+        foreach (var id in ids)
         {
-            var status = _hotkeyCommandMap[guid];
+            var status = _hotkeyCommandMap[id];
             if (status.IsReady)
             {
                 UnRegisterFromNative(status.Hotkey!);
@@ -69,14 +75,14 @@ public class HotkeyManager
             {
                 registedCommands.Add(status.Command);
             }
-            _hotkeyCommandMap.Remove(guid);
+            _hotkeyCommandMap.Remove(id);
         }
         return registedCommands;
     }
 
-    private void SetHotkeyCommandMap(Guid guid, Hotkey hotkey)
+    private void SetHotkeyCommandMap(string id, Hotkey hotkey)
     {
-        var found = _hotkeyCommandMap.TryGetValue(guid, out HotkeyStatus? hotkeyStatus);
+        var found = _hotkeyCommandMap.TryGetValue(id, out HotkeyStatus? hotkeyStatus);
         if (hotkeyStatus is not null)
         {
             if (hotkeyStatus.IsReady)
@@ -92,15 +98,15 @@ public class HotkeyManager
         }
         else
         {
-            _hotkeyCommandMap.Add(guid, new(hotkey));
+            _hotkeyCommandMap.Add(id, new(hotkey));
         }
     }
 
-    private void AddHotkeyCommandMap(IEnumerable<KeyValuePair<Guid, Hotkey>> hotkeys)
+    private void AddHotkeyCommandMap(IEnumerable<KeyValuePair<string, Hotkey>> hotkeys)
     {
-        foreach (var (guid, hotkey) in hotkeys)
+        foreach (var (id, hotkey) in hotkeys)
         {
-            SetHotkeyCommandMap(guid, hotkey);
+            SetHotkeyCommandMap(id, hotkey);
         }
     }
 
@@ -124,7 +130,7 @@ public class HotkeyManager
 
     private void RegisterCommand(UniqueCommand command, bool notify = true)
     {
-        _hotkeyCommandMap.TryGetValue(command.Guid, out HotkeyStatus? hotkeyStatus);
+        _hotkeyCommandMap.TryGetValue(command.CmdId, out HotkeyStatus? hotkeyStatus);
         if (hotkeyStatus is null)
         {
             bool ready = false;
@@ -132,7 +138,7 @@ public class HotkeyManager
             {
                 ready = RegisterToNative(command.Hotkey, command.Command);
             }
-            _hotkeyCommandMap.Add(command.Guid, new(command.Hotkey, ready, command));
+            _hotkeyCommandMap.Add(command.CmdId, new(command.Hotkey, ready, command));
         }
         else
         {
@@ -154,53 +160,31 @@ public class HotkeyManager
         if (collection is null)
             _commandCollections.Add(commandCollection);
         else
-            commandCollection.Commands.ForEach(command => collection.Commands.Add(command));
+            commandCollection.Commands.ForEach(collection.Commands.Add);
 
         RegisterCommands(commandCollection.Commands);
     }
 
-    public void RegisterCommands(string name, IEnumerable<UniqueCommand> commands, string? fontIcon = null)
+    public void SetHotKey(string id, Hotkey hotkey)
     {
-        var collection = _commandCollections.Find(collection => collection.Name == name);
-        if (collection is null)
-            _commandCollections.Add(new(name, fontIcon ?? PageDefinition.Hotkey.FontIcon!, commands));
-        else
-            commands.ForEach(command => collection.Commands.Add(command));
-
-        RegisterCommands(commands);
-    }
-
-    public void RegisterCommand(string name, UniqueCommand command, string? fontIcon = null)
-    {
-        var collection = _commandCollections.Find(collection => collection.Name == name);
-        if (collection is null)
-            _commandCollections.Add(new(name, fontIcon ?? PageDefinition.Hotkey.FontIcon!, command));
-        else
-            collection.Commands.Add(command);
-
-        RegisterCommand(command);
-    }
-
-    public void SetHotKey(Guid guid, Hotkey hotkey)
-    {
-        _hotkeyConfig.Hotkeys.TryGetValue(guid, out var existHotkey);
+        _hotkeyConfig.Hotkeys.TryGetValue(id, out var existHotkey);
         if (existHotkey is not null)
         {
-            _hotkeyConfig.Hotkeys[guid] = hotkey;
+            _hotkeyConfig.Hotkeys[id] = hotkey;
         }
         else
         {
-            _hotkeyConfig.Hotkeys.Add(guid, hotkey);
+            _hotkeyConfig.Hotkeys.Add(id, hotkey);
         }
 
-        SetHotkeyCommandMap(guid, hotkey);
+        SetHotkeyCommandMap(id, hotkey);
         HotkeyStatusChanged?.Invoke();
         _configManager.SetConfig(_hotkeyConfig);
     }
 
-    public void SetHotKeyToDefault(Guid guid)
+    public void SetHotKeyToDefault(string id)
     {
-        if (!_hotkeyCommandMap.TryGetValue(guid, out HotkeyStatus? status))
+        if (!_hotkeyCommandMap.TryGetValue(id, out HotkeyStatus? status))
         {
             return;
         }
@@ -220,7 +204,7 @@ public class HotkeyManager
             status.IsReady = RegisterToNative(status.Hotkey, status.Command.Command);
         }
 
-        _hotkeyConfig.Hotkeys.Remove(guid);
+        _hotkeyConfig.Hotkeys.Remove(id);
 
         HotkeyStatusChanged?.Invoke();
         _configManager.SetConfig(_hotkeyConfig);
@@ -229,5 +213,57 @@ public class HotkeyManager
     public bool IsValidHotkeyForm(Hotkey hotkey)
     {
         return hotkey == Hotkey.Nothing || _nativeHotkeyRegistry.IsValidHotkeyForm(hotkey);
+    }
+
+    public void RunCommand(string cmdId)
+    {
+        cmdId = CommandIds.Resolve(cmdId);
+        if (_hotkeyCommandMap.TryGetValue(cmdId, out HotkeyStatus? status) && status.Command is not null)
+        {
+            status.Command.Command.InvokeNoExcept();
+        }
+    }
+
+    public void SuspendSystemHotkeys()
+    {
+        lock (_registrationLock)
+        {
+            if (IsSystemHotkeysSuspended)
+            {
+                return;
+            }
+
+            IsSystemHotkeysSuspended = true;
+            foreach (var status in _hotkeyCommandMap.Values)
+            {
+                if (status.IsReady && status.Hotkey is not null)
+                {
+                    UnRegisterFromNative(status.Hotkey);
+                    status.IsReady = false;
+                }
+            }
+        }
+        HotkeyStatusChanged?.Invoke();
+    }
+
+    public void ResumeSystemHotkeys()
+    {
+        lock (_registrationLock)
+        {
+            if (!IsSystemHotkeysSuspended)
+            {
+                return;
+            }
+
+            IsSystemHotkeysSuspended = false;
+            foreach (var status in _hotkeyCommandMap.Values)
+            {
+                if (status.Command is not null && status.Hotkey is not null && !status.IsReady)
+                {
+                    status.IsReady = RegisterToNative(status.Hotkey, status.Command.Command);
+                }
+            }
+        }
+        HotkeyStatusChanged?.Invoke();
     }
 }

@@ -5,23 +5,16 @@ using System.IO.Pipes;
 
 namespace SyncClipboard.Core.Utilities;
 
-public sealed class AppInstance : IDisposable
+public sealed class AppInstance(IMainWindow window, ILogger logger, HotkeyManager hotkeyManager) : IDisposable
 {
     private const string ActiveCommand = "Active";
+    private const string ShutdownCommand = "Shutdown";
     private static readonly string MutexPrefix = @$"Global\{Env.SoftName}-Mutex-{Environment.UserName}-";
     private static readonly string PipePrefix = @$"Global\{Env.SoftName}-Pipe-{Environment.UserName}-";
-
-    private readonly IMainWindow _mainWindow;
-    private readonly ILogger _logger;
     private bool _disposed = false;
 
     private CancellationTokenSource? _cancellationSource = null;
-
-    public AppInstance(IMainWindow window, ILogger logger)
-    {
-        _mainWindow = window;
-        _logger = logger;
-    }
+    private static Mutex? GlobalMutex = null;
 
     ~AppInstance() => Dispose();
 
@@ -33,15 +26,41 @@ public sealed class AppInstance : IDisposable
         }
         CancelWaitForOtherInstanceToActiveAsync();
         GC.SuppressFinalize(this);
+        GlobalMutex?.ReleaseMutex();
+        GlobalMutex?.Dispose();
         _disposed = true;
+    }
+
+    private async Task ParseCommand(string? command)
+    {
+        if (string.IsNullOrWhiteSpace(command))
+        {
+            logger.Write("Received empty command, ignoring.");
+            return;
+        }
+
+        if (command is ActiveCommand)
+        {
+            window?.Show();
+        }
+        else if (command is ShutdownCommand)
+        {
+            await AppCore.Current.ExitAsync();
+        }
+        else if (command.StartsWith(StartArguments.CommandPrefix))
+        {
+            var cmdName = command[StartArguments.CommandPrefix.Length..];
+            hotkeyManager.RunCommand(cmdName);
+        }
+        else
+        {
+            logger.Write($"Unknown command received: {command}");
+        }
     }
 
     public async void WaitForOtherInstanceToActiveAsync()
     {
-        if (_disposed)
-        {
-            throw new ObjectDisposedException(nameof(AppInstance));
-        }
+        ObjectDisposedException.ThrowIf(_disposed, nameof(AppInstance));
 
         CancelWaitForOtherInstanceToActiveAsync();
         Interlocked.CompareExchange(ref _cancellationSource, new CancellationTokenSource(), null);
@@ -54,16 +73,17 @@ public sealed class AppInstance : IDisposable
                 using var pipeServer = new NamedPipeServerStream(PipePrefix, PipeDirection.InOut, 1);
                 await pipeServer.WaitForConnectionAsync(cancellationToken);
                 using var reader = new StreamReader(pipeServer);
-                var command = await reader.ReadLineAsync().WaitAsync(cancellationToken);
+                var command = await reader.ReadLineAsync(cancellationToken);
 
-                if (command is ActiveCommand)
-                {
-                    _mainWindow?.Show();
-                }
+                await ParseCommand(command);
             }
-            catch (Exception ex)
+            catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                _logger.Write(ex.ToString());
+                await logger.WriteAsync(ex.ToString());
+            }
+            catch (OperationCanceledException)
+            {
+                await logger.WriteAsync("AppInstance", "Exited Normally");
             }
         }
     }
@@ -76,7 +96,7 @@ public sealed class AppInstance : IDisposable
         _cancellationSource = null;
     }
 
-    private static async Task ActiveOtherInstance()
+    private static async Task SendCommandToOtherInstance(string command)
     {
         using var pipeClient = new NamedPipeClientStream(".", PipePrefix, PipeDirection.InOut);
         var token = new CancellationTokenSource(TimeSpan.FromSeconds(3)).Token;
@@ -84,7 +104,7 @@ public sealed class AppInstance : IDisposable
         {
             await pipeClient.ConnectAsync(token);
             using var writer = new StreamWriter(pipeClient);
-            writer.WriteLine(ActiveCommand);
+            writer.WriteLine(command);
             writer.Flush();
         }
         catch (Exception ex)
@@ -93,14 +113,81 @@ public sealed class AppInstance : IDisposable
         }
     }
 
-    public static Mutex? EnsureSingleInstance()
+    private static Task ShutdownOtherInstance()
+    {
+        return SendCommandToOtherInstance(ShutdownCommand);
+    }
+
+    private static Task ActiveOtherInstance()
+    {
+        return SendCommandToOtherInstance(ActiveCommand);
+    }
+
+    public static Mutex? CreateMutexOrWakeUp(string[] args)
     {
         Mutex mutex = new(false, MutexPrefix, out bool createdNew);
         if (!createdNew)
         {
-            ActiveOtherInstance().Wait();
+            if (args.Any(args => args.StartsWith(StartArguments.CommandPrefix)))
+            {
+                foreach (var arg in args)
+                {
+                    if (arg.StartsWith(StartArguments.CommandPrefix))
+                    {
+                        SendCommandToOtherInstance(arg).Wait();
+                    }
+                }
+            }
+            else
+            {
+                ActiveOtherInstance().Wait();
+            }
+            mutex.Dispose();
             return null;
         }
         return mutex;
+    }
+
+    public static Mutex? ForceCreateMutex()
+    {
+        Mutex mutex = new(false, MutexPrefix, out bool createdNew);
+        if (!createdNew)
+        {
+            ShutdownOtherInstance().Wait();
+        }
+        return mutex;
+    }
+
+    public static bool EnsureSingleInstance(string[] args)
+    {
+        Mutex? mutex;
+        if (args.Contains(StartArguments.ShutdownPrivious))
+        {
+            mutex = ForceCreateMutex();
+        }
+        else
+        {
+            mutex = CreateMutexOrWakeUp(args);
+        }
+
+        if (mutex is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            if (mutex.WaitOne(TimeSpan.FromSeconds(10)))
+            {
+                GlobalMutex = mutex;
+                return true;
+            }
+            return false;
+        }
+        catch (AbandonedMutexException)
+        {
+            GlobalMutex = new(false, MutexPrefix);
+            return GlobalMutex?.WaitOne(TimeSpan.FromSeconds(10)) ?? false;
+        }
     }
 }
